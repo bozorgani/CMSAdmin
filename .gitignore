@@ -1,0 +1,33 @@
+# Node
+node_modules/
+
+# Next.js
+.next/
+out/
+.vercel/
+
+# Build artifacts
+.dist/
+dist/
+coverage/
+
+# Env files
+.env
+.env.*
+
+# OS/Editor junk
+.DS_Store
+*.log
+
+# Local caches
+.npm/
+.yarn/
+.pnpm-store/
+
+# Others
+*.local
+
+node_modules/
+.next/
+dist/
+uploads/
