@@ -53,15 +53,15 @@ export default async function HomePage() {
   ];
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 lg:space-y-6">
       {/* Welcome Section */}
-      <div className="bg-gradient-to-r from-blue-600 to-blue-800 rounded-xl p-8 text-white shadow-lg">
-        <h1 className="text-3xl font-bold mb-2">خوش آمدید به پنل مدیریت</h1>
-        <p className="text-blue-100">به پنل مدیریت محتوای بلاگ خود خوش آمدید</p>
+      <div className="bg-gradient-to-r from-blue-600 to-blue-800 rounded-xl p-6 lg:p-8 text-white shadow-lg">
+        <h1 className="text-2xl lg:text-3xl font-bold mb-2">خوش آمدید به پنل مدیریت</h1>
+        <p className="text-blue-100 text-sm lg:text-base">به پنل مدیریت محتوای بلاگ خود خوش آمدید</p>
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6">
         {stats.map((stat) => {
           const Icon = stat.icon;
           return (
@@ -85,9 +85,9 @@ export default async function HomePage() {
       </div>
 
       {/* Quick Actions */}
-      <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
-        <h2 className="text-xl font-semibold text-gray-900 mb-4">دسترسی سریع</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="bg-white rounded-xl p-4 lg:p-6 shadow-sm border border-gray-200">
+        <h2 className="text-lg lg:text-xl font-semibold text-gray-900 mb-4">دسترسی سریع</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
           {quickActions.map((action) => {
             const Icon = action.icon;
             return (
@@ -105,9 +105,9 @@ export default async function HomePage() {
       </div>
 
       {/* Recent Activity */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
-          <h2 className="text-xl font-semibold text-gray-900 mb-4">آخرین پست‌ها</h2>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-6">
+        <div className="bg-white rounded-xl p-4 lg:p-6 shadow-sm border border-gray-200">
+          <h2 className="text-lg lg:text-xl font-semibold text-gray-900 mb-4">آخرین پست‌ها</h2>
           <div className="space-y-3">
             {data.recentPosts.map((p) => (
               <div key={p._id} className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 transition-colors">
@@ -126,8 +126,8 @@ export default async function HomePage() {
           </Link>
         </div>
 
-        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-200">
-          <h2 className="text-xl font-semibold text-gray-900 mb-4">آمار کلی</h2>
+        <div className="bg-white rounded-xl p-4 lg:p-6 shadow-sm border border-gray-200">
+          <h2 className="text-lg lg:text-xl font-semibold text-gray-900 mb-4">آمار کلی</h2>
           <div className="space-y-4">
             <div className="flex items-center justify-between p-4 bg-blue-50 rounded-lg">
               <div className="flex items-center gap-3">

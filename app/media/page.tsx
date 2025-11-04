@@ -143,11 +143,11 @@ export default function MediaPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="space-y-4 lg:space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">مدیریت رسانه</h1>
-          <p className="text-gray-600 mt-1">آپلود و مدیریت فایل‌های رسانه</p>
+          <h1 className="text-xl lg:text-2xl font-bold text-gray-900">مدیریت رسانه</h1>
+          <p className="text-gray-600 mt-1 text-sm lg:text-base">آپلود و مدیریت فایل‌های رسانه</p>
         </div>
           <button
             onClick={() => {
@@ -166,7 +166,7 @@ export default function MediaPage() {
                 }
               }
             }}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 shadow-sm hover:shadow-md transition-all font-medium"
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 shadow-sm hover:shadow-md transition-all font-medium text-sm lg:text-base whitespace-nowrap"
           >
             {showUpload ? 'انصراف' : '+ آپلود فایل جدید'}
           </button>
@@ -240,7 +240,7 @@ export default function MediaPage() {
       {loading ? (
         <div className="text-center p-8">در حال بارگذاری...</div>
       ) : (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 lg:gap-4">
           {mediaItems.map((item) => (
             <div key={item._id} className="bg-white rounded-xl border border-gray-200 overflow-hidden hover:shadow-lg transition-all hover:border-blue-300">
               <div className="aspect-square bg-gray-100 relative">

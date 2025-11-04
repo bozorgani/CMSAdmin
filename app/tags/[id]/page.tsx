@@ -88,30 +88,30 @@ export default function TagEditPage() {
   }
 
   return (
-    <div className="space-y-6 max-w-4xl mx-auto">
-      <div className="flex items-center justify-between">
+    <div className="space-y-4 lg:space-y-6 max-w-4xl mx-auto">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">{isNew ? 'ایجاد برچسب جدید' : 'ویرایش برچسب'}</h1>
-          <p className="text-gray-600 mt-1">{isNew ? 'برچسب جدید ایجاد کنید' : 'ویرایش برچسب'}</p>
+          <h1 className="text-xl lg:text-2xl font-bold text-gray-900">{isNew ? 'ایجاد برچسب جدید' : 'ویرایش برچسب'}</h1>
+          <p className="text-gray-600 mt-1 text-sm lg:text-base">{isNew ? 'برچسب جدید ایجاد کنید' : 'ویرایش برچسب'}</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-col sm:flex-row gap-2">
           <button
             onClick={() => router.back()}
-            className="px-4 py-2 border rounded-md hover:bg-gray-50"
+            className="px-4 py-2 border rounded-md hover:bg-gray-50 text-sm lg:text-base whitespace-nowrap"
           >
             انصراف
           </button>
           <button
             onClick={handleSave}
             disabled={saving}
-            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 text-sm lg:text-base whitespace-nowrap"
           >
             {saving ? 'در حال ذخیره...' : 'ذخیره'}
           </button>
         </div>
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-6">
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 lg:p-6 space-y-4 lg:space-y-6">
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium mb-1">نام *</label>
