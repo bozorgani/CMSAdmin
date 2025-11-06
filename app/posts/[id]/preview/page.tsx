@@ -6,6 +6,7 @@ import { getPost, getMediaUrl, getMedia } from '@/lib/api';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Image from '@tiptap/extension-image';
+import Link from '@tiptap/extension-link';
 import dayjs from 'dayjs';
 import 'dayjs/locale/fa';
 
@@ -29,6 +30,12 @@ export default function PostPreviewPage() {
       Image.configure({
         HTMLAttributes: {
           class: 'max-w-full h-auto rounded-lg',
+        },
+      }),
+      Link.configure({
+        openOnClick: true,
+        HTMLAttributes: {
+          class: 'text-blue-600 underline hover:text-blue-800',
         },
       }),
     ],
@@ -75,7 +82,7 @@ export default function PostPreviewPage() {
               setCoverImageUrl(getMediaUrl(mediaRes.media.path));
             }
           } catch (e) {
-            console.error('Error loading cover image:', e);
+            // Error loading cover image
           }
         }
       }
@@ -93,7 +100,7 @@ export default function PostPreviewPage() {
               setOgImageUrl(getMediaUrl(mediaRes.media.path));
             }
           } catch (e) {
-            console.error('Error loading OG image:', e);
+            // Error loading OG image
           }
         }
       }
