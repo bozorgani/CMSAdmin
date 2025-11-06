@@ -11,6 +11,8 @@
   },
   "dependencies": {
     "@tiptap/extension-image": "^2.27.1",
+    "@tiptap/extension-link": "^2.27.1",
+    "@tiptap/extension-text-align": "^2.27.1",
     "@tiptap/react": "^2.2.4",
     "@tiptap/starter-kit": "^2.3.4",
     "classnames": "^2.5.1",
