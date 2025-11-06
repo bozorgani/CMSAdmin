@@ -69,15 +69,15 @@ export default function PostsPage() {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="space-y-4 lg:space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">پست‌ها</h1>
-          <p className="text-gray-600 mt-1">مدیریت و ویرایش پست‌های بلاگ</p>
+          <h1 className="text-xl lg:text-2xl font-bold text-gray-900">پست‌ها</h1>
+          <p className="text-gray-600 mt-1 text-sm lg:text-base">مدیریت و ویرایش پست‌های بلاگ</p>
         </div>
         <button
           onClick={() => router.push('/posts/new')}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 shadow-sm hover:shadow-md transition-all font-medium"
+          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 shadow-sm hover:shadow-md transition-all font-medium text-sm lg:text-base whitespace-nowrap"
         >
           + ایجاد پست جدید
         </button>
@@ -85,21 +85,21 @@ export default function PostsPage() {
 
       {/* فیلترها */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 space-y-4">
-        <div className="flex flex-wrap gap-4">
-          <div className="flex-1 min-w-[200px]">
+        <div className="flex flex-col sm:flex-row gap-4">
+          <div className="flex-1 min-w-0">
             <input
               type="text"
               placeholder="جستجو در عنوان یا اسلاگ..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full px-3 py-2 border rounded-md"
+              className="w-full px-3 py-2 border rounded-md text-sm lg:text-base"
             />
           </div>
-          <div>
+          <div className="w-full sm:w-auto">
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="px-3 py-2 border rounded-md"
+              className="w-full sm:w-auto px-3 py-2 border rounded-md text-sm lg:text-base"
             >
               <option value="all">همه وضعیت‌ها</option>
               <option value="draft">پیش‌نویس</option>
@@ -112,55 +112,63 @@ export default function PostsPage() {
 
       {/* جدول پست‌ها */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-        <table className="min-w-full text-sm">
-          <thead className="bg-gray-50 text-gray-700">
-            <tr>
-              <th className="p-4 text-right">عنوان</th>
-              <th className="p-4 text-right">اسلاگ</th>
-              <th className="p-4 text-right">وضعیت</th>
-              <th className="p-4 text-right">تاریخ انتشار</th>
-              <th className="p-4 text-right">عملیات</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead className="bg-gray-50 text-gray-700">
               <tr>
-                <td className="p-4 text-center" colSpan={5}>در حال بارگذاری...</td>
+                <th className="p-3 lg:p-4 text-right whitespace-nowrap">عنوان</th>
+                <th className="p-3 lg:p-4 text-right whitespace-nowrap hidden md:table-cell">اسلاگ</th>
+                <th className="p-3 lg:p-4 text-right whitespace-nowrap">وضعیت</th>
+                <th className="p-3 lg:p-4 text-right whitespace-nowrap hidden lg:table-cell">تاریخ انتشار</th>
+                <th className="p-3 lg:p-4 text-right whitespace-nowrap">عملیات</th>
               </tr>
-            ) : filteredPosts.length === 0 ? (
-              <tr>
-                <td className="p-4 text-center" colSpan={5}>پستی یافت نشد</td>
-              </tr>
-            ) : (
-              filteredPosts.map((p) => (
-                <tr key={p._id} className="border-t hover:bg-gray-50">
-                  <td className="p-4 font-medium">{p.title}</td>
-                  <td className="p-4 text-gray-600">{p.slug}</td>
-                  <td className="p-4">{getStatusBadge(p.status)}</td>
-                  <td className="p-4 text-gray-600 text-xs">
-                    {p.publishAt ? new Date(p.publishAt).toLocaleDateString('fa-IR') : '-'}
-                  </td>
-                  <td className="p-4">
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => router.push(`/posts/${p._id}`)}
-                        className="px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200"
-                      >
-                        ویرایش
-                      </button>
-                      <button
-                        onClick={() => handleDelete(p._id)}
-                        className="px-3 py-1 text-xs bg-red-100 text-red-700 rounded hover:bg-red-200"
-                      >
-                        حذف
-                      </button>
-                    </div>
-                  </td>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td className="p-4 text-center" colSpan={5}>در حال بارگذاری...</td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+              ) : filteredPosts.length === 0 ? (
+                <tr>
+                  <td className="p-4 text-center" colSpan={5}>پستی یافت نشد</td>
+                </tr>
+              ) : (
+                filteredPosts.map((p) => (
+                  <tr key={p._id} className="border-t hover:bg-gray-50">
+                    <td className="p-3 lg:p-4 font-medium">
+                      <div className="max-w-xs truncate lg:max-w-none">{p.title}</div>
+                      <div className="md:hidden text-xs text-gray-500 mt-1">{p.slug}</div>
+                      <div className="lg:hidden text-xs text-gray-500 mt-1">
+                        {p.publishAt ? new Date(p.publishAt).toLocaleDateString('fa-IR') : '-'}
+                      </div>
+                    </td>
+                    <td className="p-3 lg:p-4 text-gray-600 hidden md:table-cell">{p.slug}</td>
+                    <td className="p-3 lg:p-4">{getStatusBadge(p.status)}</td>
+                    <td className="p-3 lg:p-4 text-gray-600 text-xs hidden lg:table-cell">
+                      {p.publishAt ? new Date(p.publishAt).toLocaleDateString('fa-IR') : '-'}
+                    </td>
+                    <td className="p-3 lg:p-4">
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <button
+                          onClick={() => router.push(`/posts/${p._id}`)}
+                          className="px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 whitespace-nowrap"
+                        >
+                          ویرایش
+                        </button>
+                        <button
+                          onClick={() => handleDelete(p._id)}
+                          className="px-3 py-1 text-xs bg-red-100 text-red-700 rounded hover:bg-red-200 whitespace-nowrap"
+                        >
+                          حذف
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );

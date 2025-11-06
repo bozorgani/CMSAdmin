@@ -10,7 +10,9 @@ import {
   Tag,
   Image as ImageIcon,
   Settings,
-  LogOut
+  LogOut,
+  Menu,
+  X
 } from 'lucide-react';
 import { logout as logoutUser, getCurrentUser } from '@/lib/api';
 
@@ -21,6 +23,7 @@ interface LayoutProps {
 export function Layout({ children }: LayoutProps) {
   const pathname = usePathname();
   const [user, setUser] = useState<any>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     const currentUser = getCurrentUser();
@@ -42,14 +45,26 @@ export function Layout({ children }: LayoutProps) {
     return pathname?.startsWith(href);
   };
 
+  const closeSidebar = () => setSidebarOpen(false);
+
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* Mobile Overlay */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden"
+          onClick={closeSidebar}
+        />
+      )}
+
       {/* Sidebar */}
-      <aside className="fixed right-0 top-0 h-full w-64 bg-white border-l border-gray-200 shadow-lg z-40">
+      <aside className={`fixed right-0 top-0 h-full w-64 bg-white border-l border-gray-200 shadow-lg z-50 transform transition-transform duration-300 ease-in-out ${
+        sidebarOpen ? 'translate-x-0' : 'translate-x-full'
+      } lg:translate-x-0`}>
         <div className="h-full flex flex-col">
           {/* Logo */}
-          <div className="p-6 border-b border-gray-200">
-            <Link href="/" className="flex items-center gap-3">
+          <div className="p-4 lg:p-6 border-b border-gray-200 flex items-center justify-between">
+            <Link href="/" className="flex items-center gap-3" onClick={closeSidebar}>
               <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-blue-800 rounded-lg flex items-center justify-center">
                 <span className="text-white font-bold text-xl">C</span>
               </div>
@@ -58,6 +73,12 @@ export function Layout({ children }: LayoutProps) {
                 <p className="text-xs text-gray-500">پنل مدیریت</p>
               </div>
             </Link>
+            <button
+              onClick={closeSidebar}
+              className="lg:hidden p-2 hover:bg-gray-100 rounded-lg"
+            >
+              <X className="w-5 h-5" />
+            </button>
           </div>
 
           {/* Navigation */}
@@ -70,6 +91,7 @@ export function Layout({ children }: LayoutProps) {
                   <li key={item.href}>
                     <Link
                       href={item.href}
+                      onClick={closeSidebar}
                       className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all ${
                         active
                           ? 'bg-blue-50 text-blue-700 border-r-2 border-blue-600 font-medium'
@@ -87,12 +109,18 @@ export function Layout({ children }: LayoutProps) {
 
           {/* Footer */}
           <div className="p-4 border-t border-gray-200">
-            <button className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-gray-700 hover:bg-gray-50 transition-all">
+            <button
+              onClick={closeSidebar}
+              className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-gray-700 hover:bg-gray-50 transition-all"
+            >
               <Settings className="w-5 h-5" />
               <span>تنظیمات</span>
             </button>
             <button
-              onClick={() => logoutUser()}
+              onClick={() => {
+                logoutUser();
+                closeSidebar();
+              }}
               className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-red-600 hover:bg-red-50 transition-all mt-2"
             >
               <LogOut className="w-5 h-5" />
@@ -103,18 +131,26 @@ export function Layout({ children }: LayoutProps) {
       </aside>
 
       {/* Main Content */}
-      <main className="mr-64 min-h-screen">
+      <main className="lg:mr-64 min-h-screen">
         {/* Header */}
         <header className="sticky top-0 z-30 bg-white border-b border-gray-200 shadow-sm">
-          <div className="px-6 py-4">
+          <div className="px-4 lg:px-6 py-4">
             <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-xl font-semibold text-gray-900">
-                  {menuItems.find(item => isActive(item.href))?.label || 'داشبورد'}
-                </h2>
-              </div>
               <div className="flex items-center gap-4">
-                <div className="text-left">
+                <button
+                  onClick={() => setSidebarOpen(true)}
+                  className="lg:hidden p-2 hover:bg-gray-100 rounded-lg"
+                >
+                  <Menu className="w-6 h-6" />
+                </button>
+                <div>
+                  <h2 className="text-lg lg:text-xl font-semibold text-gray-900">
+                    {menuItems.find(item => isActive(item.href))?.label || 'داشبورد'}
+                  </h2>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 lg:gap-4">
+                <div className="text-left hidden sm:block">
                   <p className="text-sm font-medium text-gray-900">
                     {user?.name || user?.email || 'کاربر'}
                   </p>
@@ -129,7 +165,7 @@ export function Layout({ children }: LayoutProps) {
         </header>
 
         {/* Page Content */}
-        <div className="p-6">
+        <div className="p-4 lg:p-6">
           {children}
         </div>
       </main>
