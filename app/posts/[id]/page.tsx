@@ -457,7 +457,7 @@ export default function PostEditPage() {
                 value={formData.seo.ogImageId}
                 onChange={(id) => setFormData(prev => ({
                   ...prev,
-                  seo: { ...prev.seo, ogImageId: id || '' }
+                  seo: { ...prev.seo, ogImageId: id ?? '' }
                 }))}
                 label=""
               />
@@ -665,7 +665,7 @@ export default function PostEditPage() {
             <h2 className="text-lg font-semibold">تصویر شاخص</h2>
             <MediaSelector
               value={formData.coverImageId}
-              onChange={(id) => setFormData(prev => ({ ...prev, coverImageId: id || '' }))}
+              onChange={(id) => setFormData(prev => ({ ...prev, coverImageId: id ?? '' }))}
               label=""
             />
           </div>

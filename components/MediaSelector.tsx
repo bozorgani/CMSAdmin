@@ -18,6 +18,9 @@ export function MediaSelector({ value, onChange, label }: MediaSelectorProps) {
   useEffect(() => {
     if (value) {
       loadMedia();
+    } else {
+      // Reset selected media when value is cleared
+      setSelectedMedia(null);
     }
   }, [value]);
 
@@ -37,6 +40,9 @@ export function MediaSelector({ value, onChange, label }: MediaSelectorProps) {
             if (one.ok && one.media) setSelectedMedia(one.media);
           } catch {}
         }
+      } else {
+        // Clear selected media if value is empty
+        setSelectedMedia(null);
       }
     }
     setLoading(false);
