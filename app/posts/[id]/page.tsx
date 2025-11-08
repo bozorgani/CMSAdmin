@@ -54,7 +54,8 @@ export default function PostEditPage() {
       ogDescription: '',
       ogImageId: '',
       twitterCard: 'summary_large_image',
-      schemaType: 'Article'
+      schemaType: 'Article',
+      jsonLd: null as any
     }
   });
 
@@ -97,7 +98,8 @@ export default function PostEditPage() {
           ogDescription: post.seo?.ogDescription || '',
           ogImageId: typeof post.seo?.ogImageId === 'string' ? post.seo.ogImageId : (post.seo?.ogImageId?._id?.toString() || ''),
           twitterCard: post.seo?.twitterCard || 'summary_large_image',
-          schemaType: post.seo?.schemaType || 'Article'
+          schemaType: post.seo?.schemaType || 'Article',
+          jsonLd: post.seo?.jsonLd || null
         }
       });
       // Sync Persian picker with publishAt
@@ -306,6 +308,7 @@ export default function PostEditPage() {
         ogImage: '',
         ogType: '',
         ogLocale: '',
+        jsonLd: null as any,
         content: '',
         excerpt: ''
       };
@@ -370,6 +373,23 @@ export default function PostEditPage() {
       const ogLocale = doc.querySelector('meta[property="og:locale"]');
       if (ogLocale) {
         result.ogLocale = ogLocale.getAttribute('content') || '';
+      }
+
+      // Extract JSON-LD from script tags
+      const jsonLdScripts = doc.querySelectorAll('script[type="application/ld+json"]');
+      if (jsonLdScripts.length > 0) {
+        try {
+          // Get the first JSON-LD script (or combine them if multiple)
+          const jsonLdText = jsonLdScripts[0].textContent || '';
+          if (jsonLdText.trim()) {
+            result.jsonLd = JSON.parse(jsonLdText);
+          }
+          // If there are multiple JSON-LD scripts, you might want to combine them
+          // For now, we'll use the first one
+        } catch (error) {
+          console.error('Error parsing JSON-LD:', error);
+          // Continue without JSON-LD if parsing fails
+        }
       }
 
       // Extract content from body
@@ -483,6 +503,7 @@ export default function PostEditPage() {
             ogTitle: parsed.ogTitle || parsed.title || prev.seo.ogTitle,
             ogDescription: parsed.ogDescription || parsed.metaDescription || prev.seo.ogDescription,
             schemaType: schemaType,
+            jsonLd: parsed.jsonLd || prev.seo.jsonLd,
           }
         };
       });
@@ -535,7 +556,8 @@ export default function PostEditPage() {
         coverImageId: formData.coverImageId || undefined,
         seo: {
           ...formData.seo,
-          ogImageId: formData.seo.ogImageId || undefined
+          ogImageId: formData.seo.ogImageId || undefined,
+          jsonLd: formData.seo.jsonLd || undefined
         }
       };
       
@@ -785,6 +807,100 @@ export default function PostEditPage() {
                 className="w-full px-3 py-2 border rounded-md"
                 placeholder="https://example.com/post"
               />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                JSON-LD (Structured Data)
+                <span className="text-xs text-gray-500 font-normal mr-1">(اختیاری)</span>
+              </label>
+              <textarea
+                value={formData.seo.jsonLd ? JSON.stringify(formData.seo.jsonLd, null, 2) : ''}
+                onChange={(e) => {
+                  try {
+                    const value = e.target.value.trim();
+                    if (!value) {
+                      setFormData(prev => ({
+                        ...prev,
+                        seo: { ...prev.seo, jsonLd: null }
+                      }));
+                      return;
+                    }
+                    const parsed = JSON.parse(value);
+                    setFormData(prev => ({
+                      ...prev,
+                      seo: { ...prev.seo, jsonLd: parsed }
+                    }));
+                  } catch (error) {
+                    // Invalid JSON - don't update state, but keep the text for editing
+                    // User can fix the JSON
+                  }
+                }}
+                onBlur={(e) => {
+                  // Validate JSON on blur
+                  try {
+                    const value = e.target.value.trim();
+                    if (value) {
+                      JSON.parse(value);
+                    }
+                  } catch (error) {
+                    alert('JSON نامعتبر است! لطفا JSON را اصلاح کنید.\n\nخطا: ' + (error instanceof Error ? error.message : String(error)));
+                  }
+                }}
+                className="w-full px-3 py-2 border rounded-md font-mono text-sm"
+                rows={8}
+                placeholder='{"@context": "https://schema.org", "@type": "Article", ...}'
+                dir="ltr"
+                spellCheck={false}
+              />
+              <div className="mt-2 space-y-1">
+                <p className="text-xs text-gray-500">
+                  💡 JSON-LD برای Structured Data (Schema.org). می‌توانید JSON کامل را اینجا وارد کنید.
+                </p>
+                <details className="text-xs">
+                  <summary className="cursor-pointer text-blue-600 hover:text-blue-800">
+                    📋 مثال JSON-LD برای Article
+                  </summary>
+                  <pre className="mt-2 p-3 bg-gray-50 rounded border text-xs overflow-x-auto" dir="ltr">
+{`{
+  "@context": "https://schema.org",
+  "@type": "Article",
+  "headline": "عنوان مقاله",
+  "description": "توضیحات مقاله",
+  "image": "https://example.com/image.jpg",
+  "author": {
+    "@type": "Person",
+    "name": "نام نویسنده"
+  },
+  "publisher": {
+    "@type": "Organization",
+    "name": "نام سازمان"
+  },
+  "datePublished": "2025-01-01",
+  "dateModified": "2025-01-01"
+}`}
+                  </pre>
+                </details>
+                {formData.seo.jsonLd && (
+                  <div className="mt-2 p-2 bg-green-50 border border-green-200 rounded text-xs">
+                    <span className="text-green-700">✓ JSON معتبر است</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (confirm('آیا مطمئن هستید که می‌خواهید JSON-LD را پاک کنید؟')) {
+                          setFormData(prev => ({
+                            ...prev,
+                            seo: { ...prev.seo, jsonLd: null }
+                          }));
+                        }
+                      }}
+                      className="mr-2 text-red-600 hover:text-red-800"
+                    >
+                      حذف
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
@@ -1244,6 +1360,7 @@ export default function PostEditPage() {
                       <li>og:locale</li>
                     </ul>
                   </li>
+                  <li>JSON-LD از &lt;script type="application/ld+json"&gt;</li>
                   <li>محتوا از &lt;article&gt;، &lt;main&gt; یا &lt;body&gt;</li>
                 </ul>
               </div>
