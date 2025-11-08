@@ -28,6 +28,9 @@ export default function PostEditPage() {
   const [newTagName, setNewTagName] = useState('');
   const [creatingCategory, setCreatingCategory] = useState(false);
   const [creatingTag, setCreatingTag] = useState(false);
+  const [showHtmlImportModal, setShowHtmlImportModal] = useState(false);
+  const [htmlImportText, setHtmlImportText] = useState('');
+  const [htmlContentToImport, setHtmlContentToImport] = useState<string>('');
   
   const [formData, setFormData] = useState({
     title: '',
@@ -286,6 +289,239 @@ export default function PostEditPage() {
 
   const keywordDensity = calculateKeywordDensity(formData.keywords, formData.content, formData.title, formData.excerpt);
 
+  // Parse full HTML document and extract all information
+  function parseFullHtml(html: string) {
+    try {
+      // Create a temporary DOM parser
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, 'text/html');
+      
+      const result: any = {
+        title: '',
+        metaDescription: '',
+        keywords: [] as string[],
+        canonicalUrl: '',
+        ogTitle: '',
+        ogDescription: '',
+        ogImage: '',
+        ogType: '',
+        ogLocale: '',
+        content: '',
+        excerpt: ''
+      };
+
+      // Extract title from <title> tag
+      const titleTag = doc.querySelector('title');
+      if (titleTag) {
+        result.title = titleTag.textContent?.trim() || '';
+      }
+
+      // Extract meta description
+      const metaDescription = doc.querySelector('meta[name="description"]');
+      if (metaDescription) {
+        result.metaDescription = metaDescription.getAttribute('content') || '';
+      }
+
+      // Extract keywords
+      const metaKeywords = doc.querySelector('meta[name="keywords"]');
+      if (metaKeywords) {
+        const keywordsContent = metaKeywords.getAttribute('content') || '';
+        result.keywords = keywordsContent
+          .split(',')
+          .map(k => k.trim())
+          .filter(k => k.length > 0);
+      }
+
+      // Extract canonical URL
+      const canonical = doc.querySelector('link[rel="canonical"]');
+      if (canonical) {
+        result.canonicalUrl = canonical.getAttribute('href') || '';
+      }
+
+      // Extract Open Graph tags
+      const ogTitle = doc.querySelector('meta[property="og:title"]');
+      if (ogTitle) {
+        result.ogTitle = ogTitle.getAttribute('content') || '';
+      }
+
+      const ogDescription = doc.querySelector('meta[property="og:description"]');
+      if (ogDescription) {
+        result.ogDescription = ogDescription.getAttribute('content') || '';
+      }
+
+      const ogImage = doc.querySelector('meta[property="og:image"]');
+      if (ogImage) {
+        result.ogImage = ogImage.getAttribute('content') || '';
+      }
+
+      const ogType = doc.querySelector('meta[property="og:type"]');
+      if (ogType) {
+        result.ogType = ogType.getAttribute('content') || '';
+      }
+
+      const ogUrl = doc.querySelector('meta[property="og:url"]');
+      if (ogUrl) {
+        // Use og:url for canonical if canonical is not set
+        if (!result.canonicalUrl) {
+          result.canonicalUrl = ogUrl.getAttribute('content') || '';
+        }
+      }
+
+      const ogLocale = doc.querySelector('meta[property="og:locale"]');
+      if (ogLocale) {
+        result.ogLocale = ogLocale.getAttribute('content') || '';
+      }
+
+      // Extract content from body
+      // Try to find <article> first, then <main>, then <body>
+      let contentElement = doc.querySelector('article');
+      if (!contentElement) {
+        contentElement = doc.querySelector('main');
+      }
+      if (!contentElement) {
+        contentElement = doc.querySelector('body');
+      }
+      
+      if (contentElement) {
+        // Clone the element to avoid modifying the original
+        const clonedElement = contentElement.cloneNode(true) as Element;
+        
+        // Remove header, footer, nav, and script/style tags
+        const elementsToRemove = clonedElement.querySelectorAll('header, footer, nav, script, style, noscript');
+        elementsToRemove.forEach(el => el.remove());
+        
+        // Extract excerpt from first paragraph (before removing anything)
+        const firstP = clonedElement.querySelector('p');
+        if (firstP) {
+          result.excerpt = firstP.textContent?.trim().substring(0, 200) || '';
+        }
+        
+        // Extract H1 for title if title is empty
+        if (!result.title) {
+          const h1 = clonedElement.querySelector('h1');
+          if (h1) {
+            result.title = h1.textContent?.trim() || '';
+            // Optionally remove H1 from content if it's the same as title
+            // (to avoid duplication)
+          }
+        }
+        
+        // Remove style attribute from the main container element only
+        // (keep styles in child elements as they might be part of content)
+        clonedElement.removeAttribute('style');
+        clonedElement.removeAttribute('dir');
+        clonedElement.removeAttribute('lang');
+        
+        // Get innerHTML of cleaned content
+        result.content = clonedElement.innerHTML.trim();
+        
+        // Clean up empty paragraphs and extra whitespace
+        result.content = result.content
+          .replace(/<p>\s*<\/p>/g, '')
+          .replace(/\n\s*\n/g, '\n')
+          .trim();
+        
+        // If content is still empty, try to get text content as fallback
+        if (!result.content && clonedElement.textContent) {
+          // Convert text to paragraphs
+          const paragraphs = clonedElement.textContent
+            .split(/\n\s*\n/)
+            .filter(p => p.trim().length > 0)
+            .map(p => `<p>${p.trim()}</p>`)
+            .join('\n');
+          result.content = paragraphs;
+        }
+      }
+
+      return result;
+    } catch (error) {
+      console.error('Error parsing HTML:', error);
+      throw new Error('خطا در parsing HTML: ' + (error instanceof Error ? error.message : String(error)));
+    }
+  }
+
+  // Handle HTML import
+  function handleImportHtml() {
+    if (!htmlImportText.trim()) {
+      alert('لطفا HTML را وارد کنید');
+      return;
+    }
+
+    try {
+      const parsed = parseFullHtml(htmlImportText);
+      
+      // Map og:type to schemaType
+      const getSchemaType = (ogType: string, currentSchemaType: string): string => {
+        if (!ogType) return currentSchemaType;
+        // Map common og:type values to schema types
+        const typeMap: Record<string, string> = {
+          'article': 'Article',
+          'Article': 'Article',
+          'blog': 'BlogPosting',
+          'BlogPosting': 'BlogPosting',
+          'news': 'NewsArticle',
+          'NewsArticle': 'NewsArticle',
+        };
+        return typeMap[ogType] || ogType || currentSchemaType;
+      };
+
+      // Update form data
+      setFormData(prev => {
+        const schemaType = getSchemaType(parsed.ogType, prev.seo.schemaType);
+        
+        return {
+          ...prev,
+          title: parsed.title || prev.title,
+          slug: prev.slug || generateSlug(parsed.title || prev.title),
+          excerpt: parsed.excerpt || prev.excerpt,
+          keywords: parsed.keywords.length > 0 ? parsed.keywords : prev.keywords,
+          canonicalUrl: parsed.canonicalUrl || prev.canonicalUrl,
+          seo: {
+            ...prev.seo,
+            metaTitle: parsed.title || prev.seo.metaTitle,
+            metaDescription: parsed.metaDescription || prev.seo.metaDescription,
+            ogTitle: parsed.ogTitle || parsed.title || prev.seo.ogTitle,
+            ogDescription: parsed.ogDescription || parsed.metaDescription || prev.seo.ogDescription,
+            schemaType: schemaType,
+          }
+        };
+      });
+
+      // Set HTML content to import in editor
+      if (parsed.content) {
+        // Clean up HTML content - remove script and style tags for safety
+        let cleanedContent = parsed.content
+          .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+          .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '');
+        
+        // Set HTML content to trigger import in RichTextEditor
+        setHtmlContentToImport(cleanedContent);
+        
+        // Close modal and clear input
+        setHtmlImportText('');
+        setShowHtmlImportModal(false);
+        
+        // Show success message with all extracted information
+        setTimeout(() => {
+          const ogInfo = [];
+          if (parsed.ogTitle) ogInfo.push(`OG Title: ${parsed.ogTitle.substring(0, 50)}`);
+          if (parsed.ogDescription) ogInfo.push(`OG Description: ${parsed.ogDescription.substring(0, 50)}`);
+          if (parsed.ogImage) ogInfo.push(`OG Image: ${parsed.ogImage}`);
+          if (parsed.ogType) ogInfo.push(`OG Type: ${parsed.ogType}`);
+          if (parsed.ogLocale) ogInfo.push(`OG Locale: ${parsed.ogLocale}`);
+          
+          const message = `✅ HTML با موفقیت import شد!\n\n📋 اطلاعات استخراج شده:\n- عنوان: ${parsed.title || 'خالی'}\n- توضیحات: ${parsed.metaDescription?.substring(0, 50) || 'خالی'}...\n- کلمات کلیدی: ${parsed.keywords.length} عدد\n- Canonical URL: ${parsed.canonicalUrl || 'خالی'}\n${ogInfo.length > 0 ? '\n📱 Open Graph:\n' + ogInfo.map(info => '- ' + info).join('\n') : ''}\n\n✨ محتوا به ویرایشگر اضافه شد.${parsed.ogImage ? '\n\n⚠️ توجه: لطفا تصویر OG را از Media Library انتخاب کنید.' : ''}`;
+          alert(message);
+        }, 100);
+      } else {
+        setShowHtmlImportModal(false);
+        alert('⚠️ محتوایی در HTML یافت نشد!');
+      }
+    } catch (error) {
+      alert('خطا در import HTML: ' + (error instanceof Error ? error.message : String(error)));
+    }
+  }
+
   async function handleSave() {
     setSaving(true);
     try {
@@ -400,10 +636,22 @@ export default function PostEditPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium mb-1">محتوا *</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-sm font-medium">محتوا *</label>
+                <button
+                  type="button"
+                  onClick={() => setShowHtmlImportModal(true)}
+                  className="px-3 py-1 text-xs bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors"
+                  title="Import HTML کامل (با head و body)"
+                >
+                  📥 Import HTML کامل
+                </button>
+              </div>
               <RichTextEditor
                 content={formData.content}
                 onChange={(content) => setFormData(prev => ({ ...prev, content }))}
+                htmlContent={htmlContentToImport}
+                onHtmlImported={() => setHtmlContentToImport('')}
               />
             </div>
           </div>
@@ -940,6 +1188,90 @@ export default function PostEditPage() {
           </div>
         </div>
       </div>
+
+      {/* HTML Import Modal */}
+      {showHtmlImportModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] flex flex-col">
+            <div className="p-4 border-b flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-semibold">Import HTML کامل</h3>
+                <p className="text-sm text-gray-600 mt-1">
+                  HTML کامل صفحه (با DOCTYPE، head، body) را paste کنید. اطلاعات به‌طور خودکار استخراج می‌شود.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowHtmlImportModal(false);
+                  setHtmlImportText('');
+                }}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                ✕
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-4">
+              <textarea
+                value={htmlImportText}
+                onChange={(e) => setHtmlImportText(e.target.value)}
+                className="w-full min-h-[400px] p-4 border-2 border-gray-300 rounded-md font-mono text-xs focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-purple-500 bg-gray-50"
+                placeholder="<!DOCTYPE html>&#10;<html>&#10;  <head>&#10;    <title>عنوان</title>&#10;    <meta name=&quot;description&quot; content=&quot;...&quot; />&#10;  </head>&#10;  <body>&#10;    <article>&#10;      <h1>عنوان</h1>&#10;      <p>محتوا...</p>&#10;    </article>&#10;  </body>&#10;</html>"
+                dir="ltr"
+                spellCheck={false}
+                style={{ 
+                  fontFamily: 'Monaco, Menlo, "Ubuntu Mono", Consolas, monospace',
+                  lineHeight: '1.5'
+                }}
+              />
+              <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-md">
+                <p className="text-xs text-blue-800 mb-2">
+                  <strong>💡 اطلاعاتی که استخراج می‌شود:</strong>
+                </p>
+                <ul className="text-xs text-blue-700 list-disc list-inside space-y-1">
+                  <li>عنوان از &lt;title&gt; یا &lt;h1&gt;</li>
+                  <li>Meta Description</li>
+                  <li>Keywords</li>
+                  <li>Canonical URL (از &lt;link rel="canonical"&gt; یا og:url)</li>
+                  <li>Open Graph Tags:
+                    <ul className="list-disc list-inside mr-4 mt-1 space-y-0.5">
+                      <li>og:title</li>
+                      <li>og:description</li>
+                      <li>og:image</li>
+                      <li>og:type (تبدیل به Schema Type)</li>
+                      <li>og:url (استفاده برای Canonical)</li>
+                      <li>og:locale</li>
+                    </ul>
+                  </li>
+                  <li>محتوا از &lt;article&gt;، &lt;main&gt; یا &lt;body&gt;</li>
+                </ul>
+              </div>
+            </div>
+            
+            <div className="p-4 border-t flex gap-2 justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowHtmlImportModal(false);
+                  setHtmlImportText('');
+                }}
+                className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
+              >
+                انصراف
+              </button>
+              <button
+                type="button"
+                onClick={handleImportHtml}
+                disabled={!htmlImportText.trim()}
+                className="px-4 py-2 text-sm text-white bg-purple-600 rounded-md hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                ✓ Import و استخراج اطلاعات
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

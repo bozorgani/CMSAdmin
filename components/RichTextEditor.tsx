@@ -11,14 +11,18 @@ import { listMedia, getMediaUrl } from '@/lib/api';
 interface RichTextEditorProps {
   content: any;
   onChange: (content: any) => void;
+  htmlContent?: string; // Optional HTML content to import
+  onHtmlImported?: () => void; // Callback when HTML is imported
 }
 
-export function RichTextEditor({ content, onChange }: RichTextEditorProps) {
+export function RichTextEditor({ content, onChange, htmlContent, onHtmlImported }: RichTextEditorProps) {
   const [showImageModal, setShowImageModal] = useState(false);
   const [showLinkModal, setShowLinkModal] = useState(false);
   const [linkUrl, setLinkUrl] = useState('');
   const [linkText, setLinkText] = useState('');
   const [mediaItems, setMediaItems] = useState<any[]>([]);
+  const [viewMode, setViewMode] = useState<'visual' | 'html'>('visual');
+  const [localHtmlContent, setLocalHtmlContent] = useState('');
 
   const editor = useEditor({
     extensions: [
@@ -56,6 +60,34 @@ export function RichTextEditor({ content, onChange }: RichTextEditorProps) {
       editor.commands.setContent(content);
     }
   }, [content, editor]);
+
+  // Handle HTML content import from parent (via htmlContent prop)
+  useEffect(() => {
+    if (editor && htmlContent && htmlContent.trim()) {
+      try {
+        // Parse HTML and set content in editor
+        editor.commands.setContent(htmlContent);
+        // Update local HTML content state to sync with editor
+        setLocalHtmlContent(htmlContent);
+        // Wait a bit for editor to update, then trigger onChange
+        setTimeout(() => {
+          const json = editor.getJSON();
+          onChange(json);
+          // Call callback to clear HTML content prop
+          if (onHtmlImported) {
+            onHtmlImported();
+          }
+        }, 100);
+      } catch (error) {
+        console.error('Error importing HTML:', error);
+        alert('خطا در import HTML: ' + (error instanceof Error ? error.message : String(error)));
+        // Clear HTML content even on error
+        if (onHtmlImported) {
+          onHtmlImported();
+        }
+      }
+    }
+  }, [htmlContent, editor, onChange, onHtmlImported]);
 
   async function loadMedia() {
     const res = await listMedia({ limit: 50 });
@@ -132,6 +164,55 @@ export function RichTextEditor({ content, onChange }: RichTextEditorProps) {
     setShowLinkModal(false);
   }
 
+  // Switch to HTML mode - convert editor content to HTML
+  function handleSwitchToHtml() {
+    if (!editor) return;
+    try {
+      // Always get the latest HTML from editor when switching
+      const html = editor.getHTML();
+      // Clean up empty paragraphs and normalize whitespace
+      const cleanedHtml = html
+        .replace(/<p><\/p>/g, '') // Remove empty paragraphs
+        .replace(/\n\s*\n/g, '\n') // Remove extra newlines
+        .trim();
+      setLocalHtmlContent(cleanedHtml || '');
+      setViewMode('html');
+    } catch (error) {
+      console.error('Error converting to HTML:', error);
+      alert('خطا در تبدیل به HTML');
+    }
+  }
+
+  // Switch to Visual mode - convert HTML to editor content
+  function handleSwitchToVisual() {
+    if (!editor) return;
+    try {
+      // TipTap can parse HTML directly
+      // If localHtmlContent is empty, set empty content
+      if (!localHtmlContent.trim()) {
+        editor.commands.setContent('');
+        onChange({ type: 'doc', content: [] });
+        setViewMode('visual');
+        return;
+      }
+      
+      // Parse and set HTML content
+      editor.commands.setContent(localHtmlContent);
+      // Trigger onChange to sync with parent
+      const json = editor.getJSON();
+      onChange(json);
+      setViewMode('visual');
+    } catch (error) {
+      console.error('Error parsing HTML:', error);
+      alert('خطا در تبدیل HTML. لطفا HTML را بررسی کنید.\n\nجزئیات خطا: ' + (error instanceof Error ? error.message : String(error)));
+    }
+  }
+
+  // Handle HTML content change
+  function handleHtmlChange(newHtml: string) {
+    setLocalHtmlContent(newHtml);
+  }
+
   if (!editor) {
     return <div className="border rounded-md p-4 min-h-[300px]">در حال بارگذاری ویرایشگر...</div>;
   }
@@ -139,7 +220,33 @@ export function RichTextEditor({ content, onChange }: RichTextEditorProps) {
   return (
     <div className="border rounded-md overflow-hidden">
       {/* Toolbar */}
-      <div className="border-b bg-gray-50 p-2 flex gap-1 flex-wrap">
+      <div className="border-b bg-gray-50 p-2 flex gap-1 flex-wrap items-center">
+        {/* View Mode Toggle */}
+        <div className="w-px h-6 bg-gray-300 mx-1"></div>
+        {viewMode === 'visual' ? (
+          <button
+            type="button"
+            onClick={handleSwitchToHtml}
+            className="px-3 py-1 text-sm rounded hover:bg-gray-200 bg-blue-100 text-blue-700 font-medium"
+            title="نمایش HTML"
+          >
+            &lt;/&gt; HTML
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={handleSwitchToVisual}
+            className="px-3 py-1 text-sm rounded hover:bg-gray-200 bg-green-100 text-green-700 font-medium"
+            title="بازگشت به ویرایشگر بصری"
+          >
+            👁️ نمایش بصری
+          </button>
+        )}
+        <div className="w-px h-6 bg-gray-300 mx-1"></div>
+        
+        {/* Visual Editor Tools - Only show in visual mode */}
+        {viewMode === 'visual' && (
+          <>
         <button
           type="button"
           onClick={() => editor.chain().focus().toggleBold().run()}
@@ -323,10 +430,88 @@ export function RichTextEditor({ content, onChange }: RichTextEditorProps) {
         >
           ↷
         </button>
+        </>
+        )}
       </div>
 
-      {/* Editor */}
-      <EditorContent editor={editor} />
+      {/* Editor or HTML View */}
+      {viewMode === 'visual' ? (
+        <>
+          <EditorContent editor={editor} />
+          {/* Quick HTML import button when content is empty */}
+          {(!editor.getHTML() || editor.getHTML().trim() === '' || editor.getHTML() === '<p></p>') && (
+            <div className="p-4 border-t bg-blue-50">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-700 mb-1">
+                    می‌خواهید کل محتوا را با HTML بنویسید؟
+                  </p>
+                  <p className="text-xs text-gray-600">
+                    می‌توانید کد HTML کامل پست را paste کنید و مستقیماً تبدیل شود
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSwitchToHtml}
+                  className="px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors font-medium whitespace-nowrap"
+                >
+                  📝 شروع با HTML
+                </button>
+              </div>
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="p-4 bg-gray-50">
+          <div className="mb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                ویرایش کد HTML
+              </label>
+              <p className="text-xs text-gray-500">
+                می‌توانید کد HTML را اینجا وارد یا paste کنید
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleSwitchToVisual}
+              className="px-4 py-2 text-sm bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors font-medium whitespace-nowrap"
+            >
+              ✓ تبدیل و بازگشت به نمایش بصری
+            </button>
+          </div>
+          <textarea
+            value={localHtmlContent}
+            onChange={(e) => handleHtmlChange(e.target.value)}
+            className="w-full min-h-[500px] p-4 border-2 border-gray-300 rounded-md font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white"
+            placeholder="کد HTML را اینجا وارد کنید، مثال:&#10;&lt;h2&gt;عنوان&lt;/h2&gt;&#10;&lt;p&gt;متن پاراگراف&lt;/p&gt;&#10;&lt;ul&gt;&#10;  &lt;li&gt;آیتم لیست&lt;/li&gt;&#10;&lt;/ul&gt;"
+            dir="ltr"
+            spellCheck={false}
+            style={{ 
+              fontFamily: 'Monaco, Menlo, "Ubuntu Mono", Consolas, "source-code-pro", monospace',
+              lineHeight: '1.6'
+            }}
+          />
+          <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-md">
+            <p className="text-xs text-blue-800 mb-2">
+              <strong>💡 راهنما:</strong> می‌توانید کل محتوای پست را با HTML بنویسید. کد HTML کامل را paste کنید و سپس روی دکمه "تبدیل و بازگشت به نمایش بصری" کلیک کنید.
+            </p>
+            <div className="text-xs text-blue-700 mt-2 space-y-1">
+              <p><strong>✓ پشتیبانی شده:</strong></p>
+              <ul className="list-disc list-inside mr-4 space-y-1">
+                <li>تیترها: &lt;h1&gt;, &lt;h2&gt;, &lt;h3&gt;, ...</li>
+                <li>پاراگراف: &lt;p&gt;</li>
+                <li>متن قوی: &lt;strong&gt; یا &lt;b&gt;</li>
+                <li>متن کج: &lt;em&gt; یا &lt;i&gt;</li>
+                <li>لیست‌ها: &lt;ul&gt;, &lt;ol&gt;, &lt;li&gt;</li>
+                <li>لینک: &lt;a href="..."&gt;</li>
+                <li>تصویر: &lt;img src="..." alt="..."&gt;</li>
+                <li>و سایر تگ‌های HTML استاندارد</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Image Insert Modal */}
       {showImageModal && (
