@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { getCategory, createCategory, updateCategory } from '@/lib/api';
+import { getCategory, createCategory, updateCategory, listCategories } from '@/lib/api';
 
 export default function CategoryEditPage() {
   const router = useRouter();
@@ -12,11 +12,13 @@ export default function CategoryEditPage() {
   
   const [loading, setLoading] = useState(!isNew);
   const [saving, setSaving] = useState(false);
+  const [allCategories, setAllCategories] = useState<any[]>([]);
   
   const [formData, setFormData] = useState({
     name: '',
     slug: '',
     description: '',
+    parentId: '',
     seo: {
       metaTitle: '',
       metaDescription: ''
@@ -24,10 +26,26 @@ export default function CategoryEditPage() {
   });
 
   useEffect(() => {
-    if (!isNew) {
-      loadCategory();
+    async function loadAllCategories() {
+      const res = await listCategories();
+      if (res.ok && res.items) {
+        // Filter out current category if editing to prevent circular reference
+        const filtered = isNew 
+          ? res.items 
+          : res.items.filter((cat: any) => cat._id !== id);
+        setAllCategories(filtered);
+      }
     }
-  }, [id]);
+    loadAllCategories();
+  }, [id, isNew]);
+
+  useEffect(() => {
+    if (!isNew && id) {
+      loadCategory();
+    } else if (isNew) {
+      setLoading(false);
+    }
+  }, [id, isNew]);
 
   async function loadCategory() {
     if (!id) return;
@@ -38,6 +56,7 @@ export default function CategoryEditPage() {
         name: cat.name || '',
         slug: cat.slug || '',
         description: cat.description || '',
+        parentId: cat.parentId?._id || cat.parentId || '',
         seo: {
           metaTitle: cat.seo?.metaTitle || '',
           metaDescription: cat.seo?.metaDescription || ''
@@ -48,9 +67,69 @@ export default function CategoryEditPage() {
   }
 
   function generateSlug(name: string) {
+    // Map Persian category names to English slugs
+    const categorySlugMap: Record<string, string> = {
+      // Main categories
+      'توسعه فرانت‌اند': 'frontend',
+      'Frontend Development': 'frontend',
+      'بک‌اند و سرور': 'backend',
+      'Backend & APIs': 'backend',
+      'سئو و بهینه‌سازی': 'seo',
+      'SEO & Performance': 'seo',
+      'هوش مصنوعی و ابزارهای نوین': 'ai-tools',
+      'AI & Tools': 'ai-tools',
+      'توسعه وب مدرن': 'modern-web',
+      'Modern Web Development': 'modern-web',
+      // Subcategories - Frontend
+      'Next.js': 'nextjs',
+      'React': 'react',
+      'TypeScript': 'typescript',
+      'Tailwind CSS': 'tailwind',
+      'UI/UX': 'ui-ux',
+      // Subcategories - Backend
+      'Node.js': 'nodejs',
+      'Express': 'express',
+      'API Design': 'api-design',
+      'Database': 'database',
+      // Subcategories - SEO
+      'سئو تکنیکال': 'technical-seo',
+      'Technical SEO': 'technical-seo',
+      'Performance Optimization': 'performance',
+      'Content SEO': 'content-seo',
+      'Google Search Console': 'search-console',
+      // Subcategories - AI
+      'AI Tools': 'ai-tools',
+      'GitHub Copilot': 'github-copilot',
+      'ChatGPT for Developers': 'chatgpt',
+      'Automation': 'automation',
+      // Subcategories - Modern Web
+      'Trends 2025': 'trends-2025',
+      'Edge Runtime': 'edge-runtime',
+      'Serverless': 'serverless',
+      'Web Frameworks': 'web-frameworks',
+    };
+    
+    // Check if we have a direct mapping
+    if (categorySlugMap[name]) {
+      return categorySlugMap[name];
+    }
+    
+    // Try to extract English part from strings like "بک‌اند و سرور (Backend & APIs)"
+    const englishMatch = name.match(/\(([^)]+)\)/);
+    if (englishMatch && englishMatch[1]) {
+      return englishMatch[1]
+        .toLowerCase()
+        .replace(/[^a-z0-9\s&]+/g, '')
+        .replace(/\s+/g, '-')
+        .replace(/&/g, 'and')
+        .replace(/^-+|-+$/g, '');
+    }
+    
+    // Fallback: remove non-ASCII characters and create slug
     return name
       .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/[^a-z0-9\s-]+/g, '') // Remove non-ASCII characters
+      .replace(/\s+/g, '-')
       .replace(/^-+|-+$/g, '');
   }
 
@@ -74,10 +153,19 @@ export default function CategoryEditPage() {
 
     setSaving(true);
     try {
-      const payload = {
-        ...formData,
-        slug: formData.slug || generateSlug(formData.name)
+      const payload: any = {
+        name: formData.name,
+        slug: formData.slug || generateSlug(formData.name),
+        description: formData.description || '',
+        seo: formData.seo
       };
+      
+      // Only include parentId if it's set
+      if (formData.parentId) {
+        payload.parentId = formData.parentId;
+      } else {
+        payload.parentId = null;
+      }
       
       const res = isNew 
         ? await createCategory(payload)
@@ -161,6 +249,25 @@ export default function CategoryEditPage() {
               rows={4}
               placeholder="توضیحات دسته‌بندی"
             />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">دسته‌بندی والد (اختیاری)</label>
+            <select
+              value={formData.parentId}
+              onChange={(e) => setFormData(prev => ({ ...prev, parentId: e.target.value }))}
+              className="w-full px-3 py-2 border rounded-md"
+            >
+              <option value="">بدون دسته‌بندی والد (دسته‌بندی اصلی)</option>
+              {allCategories.map((cat) => (
+                <option key={cat._id} value={cat._id}>
+                  {cat.name}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-500 mt-1">
+              انتخاب دسته‌بندی والد این دسته‌بندی را به زیردسته تبدیل می‌کند
+            </p>
           </div>
         </div>
 

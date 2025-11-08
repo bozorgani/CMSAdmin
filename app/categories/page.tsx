@@ -9,6 +9,10 @@ type Category = {
   name: string;
   slug: string;
   description?: string;
+  parentId?: {
+    _id: string;
+    name: string;
+  } | null;
 };
 
 export default function CategoriesPage() {
@@ -40,10 +44,45 @@ export default function CategoriesPage() {
     }
   }
 
+  // Build hierarchical structure
+  const buildHierarchy = (cats: Category[]) => {
+    const categoryMap = new Map<string, Category & { children?: Category[] }>();
+    const rootCategories: (Category & { children?: Category[] })[] = [];
+    
+    // First pass: create map
+    cats.forEach(cat => {
+      categoryMap.set(cat._id, { ...cat, children: [] });
+    });
+    
+    // Second pass: build hierarchy
+    cats.forEach(cat => {
+      const category = categoryMap.get(cat._id)!;
+      if (cat.parentId && cat.parentId._id) {
+        const parent = categoryMap.get(cat.parentId._id);
+        if (parent) {
+          parent.children = parent.children || [];
+          parent.children.push(category);
+        } else {
+          rootCategories.push(category);
+        }
+      } else {
+        rootCategories.push(category);
+      }
+    });
+    
+    return rootCategories;
+  };
+
+  const hierarchicalCategories = buildHierarchy(categories);
+  
   const filteredCategories = categories.filter(cat =>
     cat.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
     cat.slug.toLowerCase().includes(searchQuery.toLowerCase())
   );
+  
+  const filteredHierarchical = searchQuery 
+    ? buildHierarchy(filteredCategories)
+    : hierarchicalCategories;
 
   return (
     <div className="space-y-4 lg:space-y-6">
@@ -79,6 +118,7 @@ export default function CategoriesPage() {
               <tr>
                 <th className="p-3 lg:p-4 text-right whitespace-nowrap">نام</th>
                 <th className="p-3 lg:p-4 text-right whitespace-nowrap hidden md:table-cell">اسلاگ</th>
+                <th className="p-3 lg:p-4 text-right whitespace-nowrap hidden lg:table-cell">دسته‌بندی والد</th>
                 <th className="p-3 lg:p-4 text-right whitespace-nowrap hidden lg:table-cell">توضیحات</th>
                 <th className="p-3 lg:p-4 text-right whitespace-nowrap">عملیات</th>
               </tr>
@@ -86,40 +126,68 @@ export default function CategoriesPage() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td className="p-4 text-center" colSpan={4}>در حال بارگذاری...</td>
+                  <td className="p-4 text-center" colSpan={5}>در حال بارگذاری...</td>
                 </tr>
               ) : filteredCategories.length === 0 ? (
                 <tr>
-                  <td className="p-4 text-center" colSpan={4}>دسته‌بندی‌ای یافت نشد</td>
+                  <td className="p-4 text-center" colSpan={5}>دسته‌بندی‌ای یافت نشد</td>
                 </tr>
               ) : (
-                filteredCategories.map((cat) => (
-                  <tr key={cat._id} className="border-t hover:bg-gray-50">
-                    <td className="p-3 lg:p-4 font-medium">
-                      <div className="max-w-xs truncate lg:max-w-none">{cat.name}</div>
-                      <div className="md:hidden text-xs text-gray-500 mt-1">{cat.slug}</div>
-                      <div className="lg:hidden text-xs text-gray-500 mt-1">{cat.description || '-'}</div>
-                    </td>
-                    <td className="p-3 lg:p-4 text-gray-600 hidden md:table-cell">{cat.slug}</td>
-                    <td className="p-3 lg:p-4 text-gray-600 hidden lg:table-cell">{cat.description || '-'}</td>
-                    <td className="p-3 lg:p-4">
-                      <div className="flex flex-col sm:flex-row gap-2">
-                        <button
-                          onClick={() => router.push(`/categories/${cat._id}`)}
-                          className="px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 whitespace-nowrap"
-                        >
-                          ویرایش
-                        </button>
-                        <button
-                          onClick={() => handleDelete(cat._id)}
-                          className="px-3 py-1 text-xs bg-red-100 text-red-700 rounded hover:bg-red-200 whitespace-nowrap"
-                        >
-                          حذف
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                <>
+                  {filteredHierarchical.map((cat) => {
+                    const renderCategoryRow = (category: typeof cat, level = 0): JSX.Element[] => {
+                      const rows: JSX.Element[] = [
+                        <tr key={category._id} className="border-t hover:bg-gray-50">
+                          <td className="p-3 lg:p-4 font-medium">
+                            <div className="flex items-center gap-2">
+                              {level > 0 && (
+                                <span className="text-gray-400" style={{ marginRight: `${level * 1.5}rem` }}>
+                                  └─
+                                </span>
+                              )}
+                              <div className="max-w-xs truncate lg:max-w-none">{category.name}</div>
+                            </div>
+                            <div className="md:hidden text-xs text-gray-500 mt-1">{category.slug}</div>
+                            <div className="lg:hidden text-xs text-gray-500 mt-1">
+                              {category.parentId?.name ? `والد: ${category.parentId.name}` : 'دسته‌بندی اصلی'}
+                            </div>
+                            <div className="lg:hidden text-xs text-gray-500 mt-1">{category.description || '-'}</div>
+                          </td>
+                          <td className="p-3 lg:p-4 text-gray-600 hidden md:table-cell">{category.slug}</td>
+                          <td className="p-3 lg:p-4 text-gray-600 hidden lg:table-cell">
+                            {category.parentId?.name || '-'}
+                          </td>
+                          <td className="p-3 lg:p-4 text-gray-600 hidden lg:table-cell">{category.description || '-'}</td>
+                          <td className="p-3 lg:p-4">
+                            <div className="flex flex-col sm:flex-row gap-2">
+                              <button
+                                onClick={() => router.push(`/categories/${category._id}`)}
+                                className="px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 whitespace-nowrap"
+                              >
+                                ویرایش
+                              </button>
+                              <button
+                                onClick={() => handleDelete(category._id)}
+                                className="px-3 py-1 text-xs bg-red-100 text-red-700 rounded hover:bg-red-200 whitespace-nowrap"
+                              >
+                                حذف
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ];
+                      
+                      if (category.children && category.children.length > 0) {
+                        category.children.forEach((child) => {
+                          rows.push(...renderCategoryRow(child, level + 1));
+                        });
+                      }
+                      
+                      return rows;
+                    };
+                    return <>{renderCategoryRow(cat)}</>;
+                  })}
+                </>
               )}
             </tbody>
           </table>

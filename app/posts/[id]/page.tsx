@@ -112,8 +112,42 @@ export default function PostEditPage() {
 
   async function loadCategories() {
     const res = await listCategories();
-    if (res.ok && res.items) setCategories(res.items);
+    if (res.ok && res.items) {
+      setCategories(res.items);
+    }
   }
+
+  // Build hierarchical structure for categories
+  const buildCategoryHierarchy = (cats: any[]) => {
+    const categoryMap = new Map<string, any & { children?: any[] }>();
+    const rootCategories: (any & { children?: any[] })[] = [];
+    
+    // First pass: create map
+    cats.forEach(cat => {
+      categoryMap.set(cat._id, { ...cat, children: [] });
+    });
+    
+    // Second pass: build hierarchy
+    cats.forEach(cat => {
+      const category = categoryMap.get(cat._id)!;
+      if (cat.parentId && (cat.parentId._id || typeof cat.parentId === 'string')) {
+        const parentId = typeof cat.parentId === 'string' ? cat.parentId : cat.parentId._id;
+        const parent = categoryMap.get(parentId);
+        if (parent) {
+          parent.children = parent.children || [];
+          parent.children.push(category);
+        } else {
+          rootCategories.push(category);
+        }
+      } else {
+        rootCategories.push(category);
+      }
+    });
+    
+    return rootCategories;
+  };
+
+  const hierarchicalCategories = buildCategoryHierarchy(categories);
 
   async function loadTags() {
     const res = await listTags();
@@ -716,44 +750,105 @@ export default function PostEditPage() {
             </div>
 
             {/* لیست دسته‌بندی‌ها */}
-            <div className="space-y-2 max-h-64 overflow-y-auto">
-              {categories
-                .filter(cat => 
-                  cat.name.toLowerCase().includes(categorySearch.toLowerCase()) ||
-                  cat.slug.toLowerCase().includes(categorySearch.toLowerCase())
-                )
-                .map((cat) => (
-                  <label key={cat._id} className="flex items-center gap-2 p-2 hover:bg-gray-50 rounded cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={formData.categoryIds.includes(cat._id)}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setFormData(prev => ({
-                            ...prev,
-                            categoryIds: [...prev.categoryIds, cat._id]
-                          }));
-                        } else {
-                          setFormData(prev => ({
-                            ...prev,
-                            categoryIds: prev.categoryIds.filter(c => c !== cat._id)
-                          }));
-                        }
-                      }}
-                      className="w-4 h-4"
-                    />
-                    <span className="text-sm flex-1">{cat.name}</span>
-                    {formData.categoryIds.includes(cat._id) && (
-                      <span className="text-xs text-blue-600">✓</span>
-                    )}
-                  </label>
-                ))}
-              {categories.filter(cat => 
-                cat.name.toLowerCase().includes(categorySearch.toLowerCase()) ||
-                cat.slug.toLowerCase().includes(categorySearch.toLowerCase())
-              ).length === 0 && (
-                <p className="text-sm text-gray-500 text-center py-4">دسته‌بندی‌ای یافت نشد</p>
-              )}
+            <div className="space-y-1 max-h-64 overflow-y-auto border rounded-lg p-2">
+              {(() => {
+                // Filter categories based on search
+                const filtered = categorySearch
+                  ? hierarchicalCategories.filter(cat => {
+                      const matchesMain = cat.name.toLowerCase().includes(categorySearch.toLowerCase()) ||
+                                        cat.slug.toLowerCase().includes(categorySearch.toLowerCase());
+                      const matchesChildren = cat.children?.some(child => 
+                        child.name.toLowerCase().includes(categorySearch.toLowerCase()) ||
+                        child.slug.toLowerCase().includes(categorySearch.toLowerCase())
+                      );
+                      return matchesMain || matchesChildren;
+                    })
+                  : hierarchicalCategories;
+
+                if (filtered.length === 0) {
+                  return (
+                    <p className="text-sm text-gray-500 text-center py-4">دسته‌بندی‌ای یافت نشد</p>
+                  );
+                }
+
+                const renderCategory = (cat: any, level = 0): JSX.Element | null => {
+                  const isMainCategory = !cat.parentId || (typeof cat.parentId === 'object' && !cat.parentId._id);
+                  const isSelected = formData.categoryIds.includes(cat._id);
+                  const hasSelectedChild = cat.children?.some((child: any) => formData.categoryIds.includes(child._id));
+
+                  return (
+                    <div key={cat._id} className="space-y-1">
+                      <label 
+                        className={`flex items-center gap-2 p-2 rounded cursor-pointer transition-colors ${
+                          isMainCategory 
+                            ? 'bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/30 border border-blue-200 dark:border-blue-800' 
+                            : 'hover:bg-gray-50 dark:hover:bg-gray-800'
+                        } ${isSelected ? 'ring-2 ring-blue-500 ring-opacity-50' : ''}`}
+                        style={{ marginRight: level > 0 ? `${level * 1.5}rem` : '0' }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setFormData(prev => ({
+                                ...prev,
+                                categoryIds: [...prev.categoryIds, cat._id]
+                              }));
+                            } else {
+                              setFormData(prev => ({
+                                ...prev,
+                                categoryIds: prev.categoryIds.filter(c => c !== cat._id)
+                              }));
+                            }
+                          }}
+                          className="w-4 h-4 text-blue-600"
+                        />
+                        <div className="flex items-center gap-2 flex-1">
+                          {level > 0 && (
+                            <span className="text-gray-400 text-xs">└─</span>
+                          )}
+                          {isMainCategory && (
+                            <span className="text-blue-600 text-sm">📂</span>
+                          )}
+                          {!isMainCategory && (
+                            <span className="text-gray-500 text-xs">•</span>
+                          )}
+                          <span className={`text-sm flex-1 ${isMainCategory ? 'font-semibold text-gray-900 dark:text-gray-100' : 'text-gray-700 dark:text-gray-300'}`}>
+                            {cat.name}
+                          </span>
+                          {isMainCategory && cat.children && cat.children.length > 0 && (
+                            <span className="text-xs text-gray-500 bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded">
+                              {cat.children.length} زیردسته
+                            </span>
+                          )}
+                        </div>
+                        {isSelected && (
+                          <span className="text-blue-600 text-sm font-bold">✓</span>
+                        )}
+                        {hasSelectedChild && !isSelected && (
+                          <span className="text-blue-400 text-xs">○</span>
+                        )}
+                      </label>
+                      {/* Render children */}
+                      {cat.children && cat.children.length > 0 && (
+                        <div className="space-y-1">
+                          {cat.children
+                            .filter((child: any) => {
+                              if (!categorySearch) return true;
+                              return child.name.toLowerCase().includes(categorySearch.toLowerCase()) ||
+                                     child.slug.toLowerCase().includes(categorySearch.toLowerCase());
+                            })
+                            .map((child: any) => renderCategory(child, level + 1))
+                            .filter(Boolean)}
+                        </div>
+                      )}
+                    </div>
+                  );
+                };
+
+                return filtered.map(cat => renderCategory(cat)).filter(Boolean);
+              })()}
             </div>
           </div>
 
