@@ -757,7 +757,7 @@ export default function PostEditPage() {
                   ? hierarchicalCategories.filter(cat => {
                       const matchesMain = cat.name.toLowerCase().includes(categorySearch.toLowerCase()) ||
                                         cat.slug.toLowerCase().includes(categorySearch.toLowerCase());
-                      const matchesChildren = cat.children?.some(child => 
+                      const matchesChildren = cat.children?.some((child: any) => 
                         child.name.toLowerCase().includes(categorySearch.toLowerCase()) ||
                         child.slug.toLowerCase().includes(categorySearch.toLowerCase())
                       );
