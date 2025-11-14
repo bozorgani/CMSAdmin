@@ -31,6 +31,8 @@ export default function PostEditPage() {
   const [showHtmlImportModal, setShowHtmlImportModal] = useState(false);
   const [htmlImportText, setHtmlImportText] = useState('');
   const [htmlContentToImport, setHtmlContentToImport] = useState<string>('');
+  const [suggestedKeywords, setSuggestedKeywords] = useState<{primary: string; secondary: string[]; lsi: string[]} | null>(null);
+  const [isExtractingKeywords, setIsExtractingKeywords] = useState(false);
   
   const [formData, setFormData] = useState({
     title: '',
@@ -43,6 +45,9 @@ export default function PostEditPage() {
     categoryIds: [] as string[],
     tags: [] as string[],
     keywords: [] as string[],
+    primaryKeyword: '',
+    secondaryKeywords: ['', ''],
+    lsiKeywords: [] as string[],
     coverImageId: '',
     canonicalUrl: '',
     isFeatured: false,
@@ -87,6 +92,13 @@ export default function PostEditPage() {
           ? post.tags.map((t: any) => (typeof t === 'string' ? t : (t?._id?.toString() || ''))).filter(Boolean)
           : [],
         keywords: Array.isArray(post.keywords) ? post.keywords : [],
+        primaryKeyword: Array.isArray(post.keywords) && post.keywords.length > 0 ? post.keywords[0] : '',
+        secondaryKeywords: Array.isArray(post.keywords) && post.keywords.length > 1 
+          ? [post.keywords[1] || '', post.keywords[2] || ''] 
+          : ['', ''],
+        lsiKeywords: Array.isArray(post.keywords) && post.keywords.length > 3 
+          ? post.keywords.slice(3) 
+          : [],
         coverImageId: typeof post.coverImageId === 'string' ? post.coverImageId : (post.coverImageId?._id?.toString() || ''),
         canonicalUrl: post.canonicalUrl || '',
         isFeatured: post.isFeatured || false,
@@ -411,6 +423,170 @@ export default function PostEditPage() {
     'this', 'that', 'these', 'those', 'it', 'its', 'they', 'them', 'their', 'there', 'then', 'than'
   ]);
 
+  // Extract keywords automatically from content
+  function extractKeywordsFromContent(content: any, title: string = '', excerpt: string = ''): {primary: string; secondary: string[]; lsi: string[]} {
+    const sections = extractTextSections(content, title, excerpt);
+    if (!sections.fullText || sections.fullText.trim().length < 50) {
+      return { primary: '', secondary: [], lsi: [] };
+    }
+
+    const allText = sections.fullText;
+    const words = tokenize(allText, true); // Remove stop words
+    const allWords = tokenize(allText, false); // Keep all words for phrase extraction
+
+    // 1. Extract single-word keywords (TF-based)
+    const wordFreq: Map<string, number> = new Map();
+    words.forEach(word => {
+      if (word.length >= 3) { // Minimum 3 characters
+        wordFreq.set(word, (wordFreq.get(word) || 0) + 1);
+      }
+    });
+
+    // 2. Extract 2-word phrases (bigrams)
+    const bigramFreq: Map<string, number> = new Map();
+    for (let i = 0; i < allWords.length - 1; i++) {
+      const word1 = normalizeText(allWords[i]);
+      const word2 = normalizeText(allWords[i + 1]);
+      if (word1.length >= 2 && word2.length >= 2 && !stopWords.has(word1) && !stopWords.has(word2)) {
+        const bigram = `${word1} ${word2}`;
+        bigramFreq.set(bigram, (bigramFreq.get(bigram) || 0) + 1);
+      }
+    }
+
+    // 3. Extract 3-word phrases (trigrams) - for more specific keywords
+    const trigramFreq: Map<string, number> = new Map();
+    for (let i = 0; i < allWords.length - 2; i++) {
+      const word1 = normalizeText(allWords[i]);
+      const word2 = normalizeText(allWords[i + 1]);
+      const word3 = normalizeText(allWords[i + 2]);
+      if (word1.length >= 2 && word2.length >= 2 && word3.length >= 2 &&
+          !stopWords.has(word1) && !stopWords.has(word2) && !stopWords.has(word3)) {
+        const trigram = `${word1} ${word2} ${word3}`;
+        trigramFreq.set(trigram, (trigramFreq.get(trigram) || 0) + 1);
+      }
+    }
+
+    // Calculate scores (frequency * length bonus)
+    const calculateScore = (phrase: string, freq: number): number => {
+      const words = phrase.split(/\s+/);
+      const lengthBonus = words.length === 1 ? 1 : words.length === 2 ? 1.5 : 2; // Prefer longer phrases
+      const lengthPenalty = phrase.length < 3 ? 0 : phrase.length > 30 ? 0.5 : 1; // Penalize very long phrases
+      return freq * lengthBonus * lengthPenalty;
+    };
+
+    // Combine all candidates
+    const candidates: Array<{phrase: string; score: number; type: 'single' | 'bigram' | 'trigram'}> = [];
+
+    // Single words (min frequency: 2)
+    wordFreq.forEach((freq, word) => {
+      if (freq >= 2) {
+        candidates.push({ phrase: word, score: calculateScore(word, freq), type: 'single' });
+      }
+    });
+
+    // Bigrams (min frequency: 2)
+    bigramFreq.forEach((freq, phrase) => {
+      if (freq >= 2) {
+        candidates.push({ phrase, score: calculateScore(phrase, freq), type: 'bigram' });
+      }
+    });
+
+    // Trigrams (min frequency: 1)
+    trigramFreq.forEach((freq, phrase) => {
+      if (freq >= 1) {
+        candidates.push({ phrase, score: calculateScore(phrase, freq), type: 'trigram' });
+      }
+    });
+
+    // Sort by score
+    candidates.sort((a, b) => b.score - a.score);
+
+    // Prioritize phrases in title and headings
+    const titleWords = normalizeText(title).split(/\s+/);
+    const headingWords = normalizeText(sections.h1 + ' ' + sections.h2).split(/\s+/);
+    const importantWords = new Set([...titleWords, ...headingWords]);
+
+    // Boost score for keywords in title/headings
+    candidates.forEach(candidate => {
+      const candidateWords = candidate.phrase.split(/\s+/);
+      const inTitle = candidateWords.some(w => importantWords.has(w));
+      if (inTitle) {
+        candidate.score *= 2; // Double the score
+      }
+    });
+
+    // Re-sort after boosting
+    candidates.sort((a, b) => b.score - a.score);
+
+    // Select keywords
+    const selected: string[] = [];
+    const seenWords = new Set<string>();
+
+    for (const candidate of candidates) {
+      // Avoid duplicates (check if any word is already used)
+      const candidateWords = candidate.phrase.split(/\s+/);
+      const hasOverlap = candidateWords.some(w => seenWords.has(w));
+      
+      if (!hasOverlap && selected.length < 10) {
+        selected.push(candidate.phrase);
+        candidateWords.forEach(w => seenWords.add(w));
+      }
+    }
+
+    // Categorize: primary (best), secondary (2-3), LSI (rest)
+    const primary = selected.length > 0 ? selected[0] : '';
+    const secondary = selected.slice(1, 3).filter(Boolean);
+    const lsi = selected.slice(3, 10).filter(Boolean);
+
+    return { primary, secondary, lsi };
+  }
+
+  // Handle auto-extract keywords
+  async function handleExtractKeywords() {
+    if (!formData.content && !formData.title) {
+      alert('لطفا ابتدا عنوان و محتوای مقاله را وارد کنید');
+      return;
+    }
+
+    setIsExtractingKeywords(true);
+    try {
+      // Small delay for better UX
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      const extracted = extractKeywordsFromContent(
+        formData.content,
+        formData.title,
+        formData.excerpt
+      );
+
+      setSuggestedKeywords(extracted);
+    } catch (error) {
+      console.error('Error extracting keywords:', error);
+      alert('خطا در استخراج کلمات کلیدی');
+    } finally {
+      setIsExtractingKeywords(false);
+    }
+  }
+
+  // Apply suggested keywords
+  function applySuggestedKeywords() {
+    if (!suggestedKeywords) return;
+
+    setFormData(prev => ({
+      ...prev,
+      primaryKeyword: suggestedKeywords.primary || prev.primaryKeyword,
+      secondaryKeywords: [
+        suggestedKeywords.secondary[0] || prev.secondaryKeywords[0],
+        suggestedKeywords.secondary[1] || prev.secondaryKeywords[1]
+      ],
+      lsiKeywords: [...prev.lsiKeywords, ...suggestedKeywords.lsi.filter(k => 
+        !prev.lsiKeywords.includes(k) && k.trim().length > 0
+      )]
+    }));
+
+    setSuggestedKeywords(null);
+  }
+
   // Extract text from different sections
   function extractTextSections(content: any, title: string = '', excerpt: string = '') {
     const contentText = extractTextFromContent(content);
@@ -429,12 +605,22 @@ export default function PostEditPage() {
     };
   }
 
-  // Normalize text for analysis
+  // Normalize text for analysis (improved for Persian/Arabic)
   function normalizeText(text: string): string {
+    if (!text) return '';
+    
     return text
       .toLowerCase()
-      .replace(/[^\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFFa-z0-9\s]/g, ' ')
+      // Remove diacritics (tashkeel) for better matching in Arabic/Persian
+      .normalize('NFD')
+      .replace(/[\u064B-\u065F\u0670\u0640]/g, '') // Remove Arabic diacritics
+      .normalize('NFC')
+      // Keep Persian/Arabic characters, English letters, numbers, and spaces
+      .replace(/[^\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF\u0620-\u064Aa-z0-9\s]/g, ' ')
+      // Normalize multiple spaces to single space
       .replace(/\s+/g, ' ')
+      // Remove zero-width characters
+      .replace(/[\u200B-\u200D\uFEFF]/g, '')
       .trim();
   }
 
@@ -448,13 +634,13 @@ export default function PostEditPage() {
     return words;
   }
 
-  // Find all occurrences of a keyword in text
+  // Find all occurrences of a keyword in text (improved accuracy)
   function findKeywordOccurrences(text: string, keyword: string): Array<{ index: number; context: string }> {
     const normalizedText = normalizeText(text);
     const normalizedKeyword = normalizeText(keyword);
     const occurrences: Array<{ index: number; context: string }> = [];
     
-    if (!normalizedKeyword) return occurrences;
+    if (!normalizedKeyword || normalizedKeyword.trim().length === 0) return occurrences;
     
     // Escape special regex characters
     const escapedKeyword = normalizedKeyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -465,48 +651,57 @@ export default function PostEditPage() {
     let regexPattern: RegExp;
     
     if (keywordWords.length === 1) {
-      // Single word: match the word (allowing for Persian/Arabic text)
-      regexPattern = new RegExp(escapedKeyword, 'gi');
+      // Single word: use word boundaries for better accuracy (but handle Persian)
+      // For Persian, we'll match the word directly but check for word boundaries manually
+      regexPattern = new RegExp(`(^|\\s)${escapedKeyword}(\\s|$)`, 'gi');
     } else {
-      // Multi-word: match as phrase with flexible whitespace
-      const phrasePattern = keywordWords.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+');
-      regexPattern = new RegExp(phrasePattern, 'gi');
+      // Multi-word: match as phrase with flexible whitespace (1-3 spaces)
+      const phrasePattern = keywordWords.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s{1,3}');
+      regexPattern = new RegExp(`(^|\\s)${phrasePattern}(\\s|$)`, 'gi');
     }
     
     let match;
-    let lastIndex = 0;
+    let lastIndex = -1;
+    const processedIndices = new Set<number>(); // Prevent duplicate matches
+    
     while ((match = regexPattern.exec(normalizedText)) !== null) {
-      // Prevent infinite loop
-      if (match.index === lastIndex) {
-        regexPattern.lastIndex++;
+      // Calculate actual start index (excluding leading space if matched)
+      const actualStart = match.index + (match[1] ? match[1].length : 0);
+      const actualEnd = actualStart + (match[0].length - (match[1] ? match[1].length : 0) - (match[2] ? match[2].length : 0));
+      
+      // Prevent duplicate matches at the same position
+      if (processedIndices.has(actualStart)) {
+        // Move forward to avoid infinite loop
+        if (regexPattern.lastIndex <= lastIndex) {
+          regexPattern.lastIndex = lastIndex + 1;
+        }
         continue;
       }
-      lastIndex = match.index;
       
-      const index = match.index;
-      const matchLength = match[0].length;
+      processedIndices.add(actualStart);
+      lastIndex = regexPattern.lastIndex;
       
       // Extract context (100 characters before and after for better context)
       const contextSize = 100;
-      const start = Math.max(0, index - contextSize);
-      const end = Math.min(normalizedText.length, index + matchLength + contextSize);
+      const start = Math.max(0, actualStart - contextSize);
+      const end = Math.min(normalizedText.length, actualEnd + contextSize);
       let context = normalizedText.substring(start, end);
       
       // Mark the keyword in context (simple highlighting)
-      const keywordStart = index - start;
-      const keywordEnd = keywordStart + matchLength;
+      const keywordStart = actualStart - start;
+      const keywordEnd = keywordStart + (actualEnd - actualStart);
       const beforeKeyword = context.substring(0, keywordStart);
       const keywordText = context.substring(keywordStart, keywordEnd);
       const afterKeyword = context.substring(keywordEnd);
       context = beforeKeyword + '【' + keywordText + '】' + afterKeyword;
       
       occurrences.push({
-        index,
+        index: actualStart,
         context: (start > 0 ? '...' : '') + context + (end < normalizedText.length ? '...' : '')
       });
       
-      // Move past this match
-      regexPattern.lastIndex = index + matchLength;
+      // Move past this match to avoid overlapping
+      regexPattern.lastIndex = actualEnd;
     }
     
     return occurrences;
@@ -524,15 +719,26 @@ export default function PostEditPage() {
     return distances.reduce((sum, d) => sum + d, 0) / distances.length;
   }
 
-  // Calculate TF-IDF (simplified - using term frequency only for now)
+  // Calculate TF (Term Frequency) - improved accuracy
   function calculateTF(words: string[], keyword: string): number {
-    const keywordWords = normalizeText(keyword).split(/\s+/);
+    if (!words || words.length === 0) return 0;
+    
+    const keywordWords = normalizeText(keyword).split(/\s+/).filter(w => w.length > 0);
+    if (keywordWords.length === 0) return 0;
+    
     if (keywordWords.length === 1) {
-      return words.filter(w => w === keywordWords[0]).length / words.length;
+      // Single word: count exact matches
+      const count = words.filter(w => w === keywordWords[0]).length;
+      return count / words.length;
     } else {
-      const phrase = keywordWords.join(' ');
+      // Multi-word phrase: count phrase occurrences
+      // Join words with spaces and search for the phrase
       const text = words.join(' ');
-      const matches = (text.match(new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
+      const phrase = keywordWords.join(' ');
+      const escapedPhrase = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      // Match phrase with flexible whitespace (1-3 spaces)
+      const regex = new RegExp(`(^|\\s)${escapedPhrase.replace(/\s+/g, '\\s{1,3}')}(\\s|$)`, 'gi');
+      const matches = (text.match(regex) || []).length;
       return matches / words.length;
     }
   }
@@ -644,19 +850,36 @@ export default function PostEditPage() {
         };
       }
       
-      // Find all occurrences
+      // Find all occurrences (improved accuracy)
       const occurrences = findKeywordOccurrences(sections.fullText, normalizedKeyword);
       const count = occurrences.length;
       
-      // Also count in individual words for single-word keywords
+      // For single-word keywords, also check individual word matches as fallback
       let actualCount = count;
       const keywordWords = normalizedKeyword.split(/\s+/).filter(w => w.length > 0);
-      if (keywordWords.length === 1 && count === 0) {
-        // Fallback: count individual word matches if phrase matching didn't work
-        actualCount = wordsWithoutStopWords.filter(w => w === keywordWords[0]).length;
+      
+      if (keywordWords.length === 1) {
+        // For single-word keywords, count both phrase matches and individual word matches
+        // But prioritize phrase matches (exact matches)
+        const individualWordCount = wordsWithoutStopWords.filter(w => w === keywordWords[0]).length;
+        
+        // If we found phrase matches, use those (more accurate)
+        // Otherwise, use individual word count as fallback
+        if (count === 0 && individualWordCount > 0) {
+          actualCount = individualWordCount;
+        } else {
+          // Use phrase matches (more accurate for exact keyword matching)
+          actualCount = count;
+        }
+      } else {
+        // For multi-word keywords (phrases), only count exact phrase matches
+        actualCount = count;
       }
       
-      // Calculate density (use count without stop words for more accurate density)
+      // Calculate density accurately
+      // For single-word keywords: density = (count / total words) * 100
+      // For multi-word keywords: density = (phrase count / total words) * 100
+      // Note: We use totalWords (without stop words) for more accurate SEO density calculation
       const density = totalWords > 0 ? (actualCount / totalWords) * 100 : 0;
       
       // Calculate TF (Term Frequency)
@@ -727,8 +950,21 @@ export default function PostEditPage() {
     });
   }
 
+  // جمع‌آوری همه کلمات کلیدی از فیلدهای جدید
+  const allKeywordsForAnalysis = (() => {
+    const keywords: string[] = [];
+    if (formData.primaryKeyword.trim()) keywords.push(formData.primaryKeyword.trim());
+    formData.secondaryKeywords.forEach(k => {
+      if (k.trim()) keywords.push(k.trim());
+    });
+    formData.lsiKeywords.forEach(k => {
+      if (k.trim()) keywords.push(k.trim());
+    });
+    return keywords;
+  })();
+
   const keywordDensity = calculateAdvancedKeywordAnalysis(
-    formData.keywords, 
+    allKeywordsForAnalysis, 
     formData.content, 
     formData.title, 
     formData.excerpt
@@ -961,8 +1197,8 @@ export default function PostEditPage() {
         // Set HTML content to trigger import in RichTextEditor
         setHtmlContentToImport(cleanedContent);
         
-        // Close modal and clear input
-        setHtmlImportText('');
+        // Close modal but keep htmlImportText for potential re-import or editing
+        // User can manually clear it if needed
         setShowHtmlImportModal(false);
         
         // Show success message with all extracted information
@@ -1006,7 +1242,17 @@ export default function PostEditPage() {
         categoryId: formData.categoryId || undefined,
         categoryIds: formData.categoryIds.length > 0 ? formData.categoryIds : undefined,
         tags: formData.tags.length > 0 ? formData.tags : undefined,
-        keywords: formData.keywords.length > 0 ? formData.keywords : undefined,
+        keywords: (() => {
+          const allKeywords: string[] = [];
+          if (formData.primaryKeyword.trim()) allKeywords.push(formData.primaryKeyword.trim());
+          formData.secondaryKeywords.forEach(k => {
+            if (k.trim()) allKeywords.push(k.trim());
+          });
+          formData.lsiKeywords.forEach(k => {
+            if (k.trim()) allKeywords.push(k.trim());
+          });
+          return allKeywords.length > 0 ? allKeywords : undefined;
+        })(),
         coverImageId: formData.coverImageId || undefined,
         seo: {
           ...formData.seo,
@@ -1588,25 +1834,175 @@ export default function PostEditPage() {
 
           {/* کلمات کلیدی */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 lg:p-6 space-y-4">
-            <h2 className="text-lg font-semibold">کلمات کلیدی</h2>
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-lg font-semibold">کلمات کلیدی SEO</h2>
+              <button
+                type="button"
+                onClick={handleExtractKeywords}
+                disabled={isExtractingKeywords || (!formData.content && !formData.title)}
+                className="px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors text-sm font-medium flex items-center gap-2"
+                title="استخراج خودکار کلمات کلیدی از محتوا"
+              >
+                {isExtractingKeywords ? (
+                  <>
+                    <span className="animate-spin">⏳</span>
+                    در حال استخراج...
+                  </>
+                ) : (
+                  <>
+                    <span>🔍</span>
+                    استخراج خودکار
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* نمایش پیشنهادات کلمات کلیدی */}
+            {suggestedKeywords && (
+              <div className="p-4 bg-blue-50 border-2 border-blue-200 rounded-lg">
+                <div className="flex items-start justify-between mb-3">
+                  <h3 className="text-sm font-semibold text-blue-900">✨ کلمات کلیدی پیشنهادی</h3>
+                  <button
+                    type="button"
+                    onClick={() => setSuggestedKeywords(null)}
+                    className="text-blue-600 hover:text-blue-800 text-sm"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div className="space-y-2 text-sm">
+                  {suggestedKeywords.primary && (
+                    <div>
+                      <span className="font-medium text-blue-800">کلمه کلیدی اصلی:</span>{' '}
+                      <span className="bg-blue-100 px-2 py-1 rounded">{suggestedKeywords.primary}</span>
+                    </div>
+                  )}
+                  {suggestedKeywords.secondary.length > 0 && (
+                    <div>
+                      <span className="font-medium text-blue-800">کلمات کلیدی فرعی:</span>{' '}
+                      {suggestedKeywords.secondary.map((kw, idx) => (
+                        <span key={idx} className="bg-blue-100 px-2 py-1 rounded mr-1">{kw}</span>
+                      ))}
+                    </div>
+                  )}
+                  {suggestedKeywords.lsi.length > 0 && (
+                    <div>
+                      <span className="font-medium text-blue-800">کلمات کلیدی LSI:</span>{' '}
+                      {suggestedKeywords.lsi.map((kw, idx) => (
+                        <span key={idx} className="bg-blue-100 px-2 py-1 rounded mr-1">{kw}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={applySuggestedKeywords}
+                  className="mt-3 w-full px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors text-sm font-medium"
+                >
+                  ✓ اعمال پیشنهادات
+                </button>
+              </div>
+            )}
             
+            {/* کلمه کلیدی اصلی */}
             <div>
-              <label className="block text-sm font-medium mb-1">کلمات کلیدی (جدا شده با کاما)</label>
-              <textarea
-                value={formData.keywords.join(', ')}
-                onChange={(e) => {
-                  const keywords = e.target.value
-                    .split(',')
-                    .map(k => k.trim())
-                    .filter(k => k.length > 0);
-                  setFormData(prev => ({ ...prev, keywords }));
-                }}
-                className="w-full px-3 py-2 border rounded-md"
-                rows={3}
-                placeholder="کلمه کلیدی ۱, کلمه کلیدی ۲, کلمه کلیدی ۳"
+              <label className="block text-sm font-medium mb-1">
+                کلمه کلیدی اصلی <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                value={formData.primaryKeyword}
+                onChange={(e) => setFormData(prev => ({ ...prev, primaryKeyword: e.target.value }))}
+                className="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                placeholder="مثال: توسعه وب"
               />
               <p className="text-xs text-gray-500 mt-1">
-                کلمات کلیدی را با کاما از هم جدا کنید
+                مهم‌ترین کلمه کلیدی که می‌خواهید برای آن رتبه بگیرید
+              </p>
+            </div>
+
+            {/* کلمات کلیدی فرعی */}
+            <div className="space-y-3">
+              <label className="block text-sm font-medium mb-1">
+                کلمات کلیدی فرعی <span className="text-gray-400">(2 مورد)</span>
+              </label>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <input
+                    type="text"
+                    value={formData.secondaryKeywords[0]}
+                    onChange={(e) => {
+                      const newSecondary = [...formData.secondaryKeywords];
+                      newSecondary[0] = e.target.value;
+                      setFormData(prev => ({ ...prev, secondaryKeywords: newSecondary }));
+                    }}
+                    className="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    placeholder="کلمه کلیدی فرعی ۱"
+                  />
+                </div>
+                <div>
+                  <input
+                    type="text"
+                    value={formData.secondaryKeywords[1]}
+                    onChange={(e) => {
+                      const newSecondary = [...formData.secondaryKeywords];
+                      newSecondary[1] = e.target.value;
+                      setFormData(prev => ({ ...prev, secondaryKeywords: newSecondary }));
+                    }}
+                    className="w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    placeholder="کلمه کلیدی فرعی ۲"
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-gray-500">
+                کلمات کلیدی مرتبط که به کلمه کلیدی اصلی کمک می‌کنند
+              </p>
+            </div>
+
+            {/* کلمات کلیدی مرتبط (LSI) */}
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                کلمات کلیدی مرتبط (LSI) <span className="text-gray-400">(چند مورد)</span>
+              </label>
+              <div className="space-y-2">
+                {formData.lsiKeywords.map((keyword, index) => (
+                  <div key={index} className="flex gap-2">
+                    <input
+                      type="text"
+                      value={keyword}
+                      onChange={(e) => {
+                        const newLsi = [...formData.lsiKeywords];
+                        newLsi[index] = e.target.value;
+                        setFormData(prev => ({ ...prev, lsiKeywords: newLsi }));
+                      }}
+                      className="flex-1 px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      placeholder={`کلمه کلیدی LSI ${index + 1}`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const newLsi = formData.lsiKeywords.filter((_, i) => i !== index);
+                        setFormData(prev => ({ ...prev, lsiKeywords: newLsi }));
+                      }}
+                      className="px-3 py-2 bg-red-100 text-red-700 rounded-md hover:bg-red-200 transition-colors"
+                      title="حذف"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFormData(prev => ({ ...prev, lsiKeywords: [...prev.lsiKeywords, ''] }));
+                  }}
+                  className="w-full px-3 py-2 border-2 border-dashed border-gray-300 rounded-md text-gray-600 hover:border-blue-500 hover:text-blue-600 transition-colors"
+                >
+                  + افزودن کلمه کلیدی LSI
+                </button>
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                کلمات کلیدی مرتبط معنایی که به درک بهتر موضوع کمک می‌کنند
               </p>
             </div>
 
@@ -2221,7 +2617,7 @@ export default function PostEditPage() {
                 type="button"
                 onClick={() => {
                   setShowHtmlImportModal(false);
-                  setHtmlImportText('');
+                  // Don't clear htmlImportText - keep it for next time
                 }}
                 className="text-gray-500 hover:text-gray-700"
               >
@@ -2267,25 +2663,40 @@ export default function PostEditPage() {
               </div>
             </div>
             
-            <div className="p-4 border-t flex gap-2 justify-end">
+            <div className="p-4 border-t flex gap-2 justify-between items-center">
               <button
                 type="button"
                 onClick={() => {
-                  setShowHtmlImportModal(false);
-                  setHtmlImportText('');
+                  if (confirm('آیا مطمئن هستید که می‌خواهید محتوای HTML را پاک کنید؟')) {
+                    setHtmlImportText('');
+                  }
                 }}
-                className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
-              >
-                انصراف
-              </button>
-              <button
-                type="button"
-                onClick={handleImportHtml}
                 disabled={!htmlImportText.trim()}
-                className="px-4 py-2 text-sm text-white bg-purple-600 rounded-md hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="px-3 py-2 text-sm text-red-600 bg-red-50 rounded-md hover:bg-red-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                title="پاک کردن محتوای HTML"
               >
-                ✓ Import و استخراج اطلاعات
+                🗑️ پاک کردن
               </button>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowHtmlImportModal(false);
+                    // Don't clear htmlImportText - keep it for next time
+                  }}
+                  className="px-4 py-2 text-sm text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
+                >
+                  انصراف
+                </button>
+                <button
+                  type="button"
+                  onClick={handleImportHtml}
+                  disabled={!htmlImportText.trim()}
+                  className="px-4 py-2 text-sm text-white bg-purple-600 rounded-md hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  ✓ Import و استخراج اطلاعات
+                </button>
+              </div>
             </div>
           </div>
         </div>
