@@ -1,20 +1,30 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
-import { listMedia, uploadMedia, deleteMedia, updateMedia, getMediaUrl, replaceMedia } from '@/lib/api';
-
-type MediaItem = {
-  _id: string;
-  path: string;
-  alt?: string;
-  caption?: string;
-  width?: number;
-  height?: number;
-  createdAt?: string;
-};
+import { useEffect, useState, useRef, useCallback } from 'react';
+import { Image as ImageIcon } from 'lucide-react';
+import {
+  listMedia,
+  uploadMedia,
+  deleteMedia,
+  updateMedia,
+  getMediaUrl,
+  replaceMedia,
+} from '@/lib/api';
+import { DEFAULT_PAGE_SIZE } from '@/lib/constants';
+import { useToast } from '@/hooks/useToast';
+import { useConfirm } from '@/hooks/useConfirm';
+import { Pagination } from '@/components/ui/Pagination';
+import { Skeleton } from '@/components/ui/Skeleton';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { Button } from '@/components/ui/Button';
+import { formatFileSize, formatPersianDate, isImage } from '@/lib/utils';
+import type { Media } from '@/types';
 
 export default function MediaPage() {
-  const [mediaItems, setMediaItems] = useState<MediaItem[]>([]);
+  const toast = useToast();
+  const { confirm } = useConfirm();
+
+  const [mediaItems, setMediaItems] = useState<Media[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -27,42 +37,76 @@ export default function MediaPage() {
   const [editCaption, setEditCaption] = useState('');
   const [replaceFile, setReplaceFile] = useState<File | null>(null);
   const [replacePreview, setReplacePreview] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Cleanup object URLs to prevent memory leaks
+  const cleanupPreview = useCallback(() => {
+    setPreviewUrl((url) => {
+      if (url) URL.revokeObjectURL(url);
+      return null;
+    });
+  }, []);
+
+  const cleanupReplacePreview = useCallback(() => {
+    setReplacePreview((url) => {
+      if (url) URL.revokeObjectURL(url);
+      return null;
+    });
+  }, []);
 
   useEffect(() => {
     loadMedia();
-  }, []);
+  }, [page]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      cleanupPreview();
+      cleanupReplacePreview();
+    };
+  }, [cleanupPreview, cleanupReplacePreview]);
 
   async function loadMedia() {
     setLoading(true);
-    const res = await listMedia({ limit: 50 });
+    const res = await listMedia({ page, limit: DEFAULT_PAGE_SIZE });
     if (res.ok && res.items) {
       setMediaItems(res.items);
+      setTotal(res.total || 0);
+    } else {
+      toast.error('خطا در بارگذاری رسانه‌ها');
     }
     setLoading(false);
   }
 
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
-    if (file) {
-      setSelectedFile(file);
-      if (!uploadAlt) {
-        setUploadAlt(file.name);
-      }
-      
-      // Create preview URL for images
-      if (file.type.startsWith('image/')) {
-        const url = URL.createObjectURL(file);
-        setPreviewUrl(url);
-      } else {
-        setPreviewUrl(null);
-      }
+    if (!file) return;
+    setSelectedFile(file);
+    if (!uploadAlt) setUploadAlt(file.name);
+
+    cleanupPreview();
+    if (file.type.startsWith('image/')) {
+      setPreviewUrl(URL.createObjectURL(file));
     }
+  }
+
+  function toggleUpload() {
+    if (showUpload) {
+      // Close form
+      cleanupPreview();
+      setSelectedFile(null);
+      setUploadAlt('');
+      setUploadCaption('');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+    setShowUpload((s) => !s);
   }
 
   async function handleUpload() {
     if (!selectedFile) {
-      alert('لطفا فایلی انتخاب کنید');
+      toast.warning('لطفا فایلی انتخاب کنید');
       return;
     }
 
@@ -70,48 +114,55 @@ export default function MediaPage() {
     try {
       const res = await uploadMedia(selectedFile, uploadAlt || undefined, uploadCaption || undefined);
       if (res.ok) {
-        // Clean up preview URL
-        if (previewUrl) {
-          URL.revokeObjectURL(previewUrl);
-          setPreviewUrl(null);
-        }
+        toast.success('فایل با موفقیت آپلود شد');
+        cleanupPreview();
         setSelectedFile(null);
         setUploadAlt('');
         setUploadCaption('');
+        if (fileInputRef.current) fileInputRef.current.value = '';
         setShowUpload(false);
-        if (fileInputRef.current) {
-          fileInputRef.current.value = '';
-        }
+        setPage(1);
         loadMedia();
       } else {
-        alert(res.error || 'خطا در آپلود فایل');
+        toast.error(res.error || 'خطا در آپلود فایل');
       }
-    } catch (e) {
-      alert('خطا در آپلود فایل');
+    } catch {
+      toast.error('خطا در آپلود فایل');
     } finally {
       setUploading(false);
     }
   }
 
-  async function handleDelete(id: string) {
-    if (!confirm('آیا از حذف این فایل اطمینان دارید؟')) return;
-    const res = await deleteMedia(id);
+  async function handleDelete(item: Media) {
+    const confirmed = await confirm({
+      title: 'حذف فایل',
+      message: `آیا از حذف "${item.alt || item.path.split('/').pop()}" اطمینان دارید؟`,
+      confirmLabel: 'حذف',
+      variant: 'danger',
+    });
+    if (!confirmed) return;
+
+    const res = await deleteMedia(item._id);
     if (res.ok) {
+      toast.success('فایل حذف شد');
       loadMedia();
     } else {
-      alert(res.error || 'خطا در حذف فایل');
+      toast.error(res.error || 'خطا در حذف فایل');
     }
   }
 
-  function startEdit(item: MediaItem) {
+  function startEdit(item: Media) {
     setEditingId(item._id);
     setEditAlt(item.alt || '');
     setEditCaption(item.caption || '');
     setReplaceFile(null);
-    if (replacePreview) {
-      URL.revokeObjectURL(replacePreview);
-      setReplacePreview(null);
-    }
+    cleanupReplacePreview();
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    cleanupReplacePreview();
+    setReplaceFile(null);
   }
 
   async function saveEdit() {
@@ -122,25 +173,19 @@ export default function MediaPage() {
     } else {
       res = await updateMedia(editingId, {
         alt: editAlt || undefined,
-        caption: editCaption || undefined
+        caption: editCaption || undefined,
       });
     }
     if (res.ok) {
-      setEditingId(null);
-      if (replacePreview) {
-        URL.revokeObjectURL(replacePreview);
-        setReplacePreview(null);
-      }
-      setReplaceFile(null);
+      toast.success('رسانه به‌روزرسانی شد');
+      cancelEdit();
       loadMedia();
     } else {
-      alert(res.error || 'خطا در به‌روزرسانی');
+      toast.error(res.error || 'خطا در به‌روزرسانی');
     }
   }
 
-  function isImage(path: string): boolean {
-    return /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(path);
-  }
+  const totalPages = Math.max(1, Math.ceil(total / DEFAULT_PAGE_SIZE));
 
   return (
     <div className="space-y-4 lg:space-y-6">
@@ -149,37 +194,22 @@ export default function MediaPage() {
           <h1 className="text-xl lg:text-2xl font-bold text-gray-900">مدیریت رسانه</h1>
           <p className="text-gray-600 mt-1 text-sm lg:text-base">آپلود و مدیریت فایل‌های رسانه</p>
         </div>
-          <button
-            onClick={() => {
-              setShowUpload(!showUpload);
-              if (showUpload) {
-                // Clean up preview when closing
-                if (previewUrl) {
-                  URL.revokeObjectURL(previewUrl);
-                  setPreviewUrl(null);
-                }
-                setSelectedFile(null);
-                setUploadAlt('');
-                setUploadCaption('');
-                if (fileInputRef.current) {
-                  fileInputRef.current.value = '';
-                }
-              }
-            }}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 shadow-sm hover:shadow-md transition-all font-medium text-sm lg:text-base whitespace-nowrap"
-          >
-            {showUpload ? 'انصراف' : '+ آپلود فایل جدید'}
-          </button>
+        <Button variant="primary" onClick={toggleUpload}>
+          {showUpload ? 'انصراف' : '+ آپلود فایل جدید'}
+        </Button>
       </div>
 
-      {/* فرم آپلود */}
+      {/* Upload form */}
       {showUpload && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 space-y-4">
           <h2 className="text-lg font-semibold">آپلود فایل جدید</h2>
-          
+
           <div>
-            <label className="block text-sm font-medium mb-1">فایل *</label>
+            <label htmlFor="media-file" className="block text-sm font-medium mb-1">
+              فایل <span className="text-red-500">*</span>
+            </label>
             <input
+              id="media-file"
               ref={fileInputRef}
               type="file"
               accept="image/*,video/*,.pdf"
@@ -189,7 +219,7 @@ export default function MediaPage() {
             {selectedFile && (
               <div className="mt-3">
                 <p className="text-sm text-gray-600 mb-2">
-                  انتخاب شده: {selectedFile.name} ({(selectedFile.size / 1024 / 1024).toFixed(2)} MB)
+                  انتخاب شده: {selectedFile.name} ({formatFileSize(selectedFile.size)})
                 </p>
                 {previewUrl && (
                   <div className="mt-3 border rounded-lg overflow-hidden">
@@ -205,8 +235,11 @@ export default function MediaPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-1">Alt Text</label>
+            <label htmlFor="upload-alt" className="block text-sm font-medium mb-1">
+              Alt Text
+            </label>
             <input
+              id="upload-alt"
               type="text"
               value={uploadAlt}
               onChange={(e) => setUploadAlt(e.target.value)}
@@ -216,8 +249,11 @@ export default function MediaPage() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-1">Caption</label>
+            <label htmlFor="upload-caption" className="block text-sm font-medium mb-1">
+              Caption
+            </label>
             <textarea
+              id="upload-caption"
               value={uploadCaption}
               onChange={(e) => setUploadCaption(e.target.value)}
               className="w-full px-3 py-2 border rounded-md"
@@ -226,134 +262,153 @@ export default function MediaPage() {
             />
           </div>
 
-          <button
-            onClick={handleUpload}
-            disabled={uploading || !selectedFile}
-            className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50"
-          >
-            {uploading ? 'در حال آپلود...' : 'آپلود'}
-          </button>
+          <div className="flex gap-2">
+            <Button variant="success" onClick={handleUpload} loading={uploading} disabled={!selectedFile}>
+              آپلود
+            </Button>
+            <Button variant="secondary" onClick={toggleUpload}>
+              انصراف
+            </Button>
+          </div>
         </div>
       )}
 
-      {/* گالری رسانه */}
+      {/* Gallery */}
       {loading ? (
-        <div className="text-center p-8">در حال بارگذاری...</div>
-      ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 lg:gap-4">
-          {mediaItems.map((item) => (
-            <div key={item._id} className="bg-white rounded-xl border border-gray-200 overflow-hidden hover:shadow-lg transition-all hover:border-blue-300">
-              <div className="aspect-square bg-gray-100 relative">
-                {isImage(item.path) ? (
-                  <img
-                    src={getMediaUrl(item.path)}
-                    alt={item.alt || ''}
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center">
-                    <div className="text-center p-4">
-                      <div className="text-4xl mb-2">📄</div>
-                      <p className="text-xs text-gray-600 truncate">{item.path.split('/').pop()}</p>
-                    </div>
-                  </div>
-                )}
-                
-                {editingId === item._id ? (
-                  <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center p-2">
-                    <div className="bg-white rounded p-2 w-full max-w-xs space-y-2">
-                      <div>
-                        <label className="block text-xs font-medium mb-1">تعویض فایل (اختیاری)</label>
-                        <input
-                          type="file"
-                          accept="image/*,video/*,.pdf"
-                          onChange={(e) => {
-                            const f = e.target.files?.[0] || null;
-                            setReplaceFile(f);
-                            if (replacePreview) URL.revokeObjectURL(replacePreview);
-                            if (f && f.type.startsWith('image/')) {
-                              setReplacePreview(URL.createObjectURL(f));
-                            } else {
-                              setReplacePreview(null);
-                            }
-                          }}
-                          className="w-full px-2 py-1 text-xs border rounded"
-                        />
-                        {replacePreview && (
-                          <div className="mt-2 border rounded overflow-hidden">
-                            <img src={replacePreview} alt="پیش‌نمایش" className="w-full h-auto" />
-                          </div>
-                        )}
-                      </div>
-                      <input
-                        type="text"
-                        value={editAlt}
-                        onChange={(e) => setEditAlt(e.target.value)}
-                        placeholder="Alt Text"
-                        className="w-full px-2 py-1 text-xs border rounded"
-                        autoFocus
-                      />
-                      <textarea
-                        value={editCaption}
-                        onChange={(e) => setEditCaption(e.target.value)}
-                        placeholder="Caption"
-                        className="w-full px-2 py-1 text-xs border rounded"
-                        rows={2}
-                      />
-                      <div className="flex gap-1">
-                        <button
-                          onClick={saveEdit}
-                          className="flex-1 px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
-                        >
-                          ذخیره
-                        </button>
-                        <button
-                          onClick={() => setEditingId(null)}
-                          className="flex-1 px-2 py-1 text-xs bg-gray-200 rounded hover:bg-gray-300"
-                        >
-                          انصراف
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="absolute inset-0 bg-black bg-opacity-0 hover:bg-opacity-50 transition-all flex items-center justify-center gap-2 opacity-0 hover:opacity-100">
-                    <button
-                      onClick={() => startEdit(item)}
-                      className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
-                    >
-                      ویرایش
-                    </button>
-                    <button
-                      onClick={() => handleDelete(item._id)}
-                      className="px-3 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700"
-                    >
-                      حذف
-                    </button>
-                  </div>
-                )}
-              </div>
-              
-              <div className="p-2">
-                <p className="text-xs font-medium truncate">{item.alt || 'بدون نام'}</p>
-                {item.caption && (
-                  <p className="text-xs text-gray-500 truncate mt-1">{item.caption}</p>
-                )}
-                {item.width && item.height && (
-                  <p className="text-xs text-gray-400 mt-1">{item.width} × {item.height}</p>
-                )}
-              </div>
-            </div>
+          {Array.from({ length: 10 }).map((_, i) => (
+            <Skeleton key={i} className="aspect-square w-full" />
           ))}
         </div>
-      )}
+      ) : mediaItems.length === 0 ? (
+        <EmptyState
+          icon={<ImageIcon className="w-12 h-12 text-gray-300" />}
+          title="هنوز رسانه‌ای آپلود نشده"
+          description="برای شروع، اولین فایل خود را آپلود کنید."
+          action={<Button onClick={() => setShowUpload(true)}>آپلود اولین فایل</Button>}
+        />
+      ) : (
+        <>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 lg:gap-4">
+            {mediaItems.map((item) => (
+              <div
+                key={item._id}
+                className="bg-white rounded-xl border border-gray-200 overflow-hidden hover:shadow-lg transition-all hover:border-blue-300"
+              >
+                <div className="aspect-square bg-gray-100 relative">
+                  {isImage(item.path) ? (
+                    <img
+                      src={getMediaUrl(item.path)}
+                      alt={item.alt || ''}
+                      className="w-full h-full object-cover"
+                      loading="lazy"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center">
+                      <div className="text-center p-4">
+                        <div className="text-4xl mb-2">📄</div>
+                        <p className="text-xs text-gray-600 truncate">{item.path.split('/').pop()}</p>
+                      </div>
+                    </div>
+                  )}
 
-      {!loading && mediaItems.length === 0 && (
-        <div className="text-center p-8 bg-white rounded-lg border">
-          <p className="text-gray-600">هنوز فایلی آپلود نشده است</p>
-        </div>
+                  {editingId === item._id ? (
+                    <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center p-2">
+                      <div className="bg-white rounded p-2 w-full max-w-xs space-y-2">
+                        <div>
+                          <label className="block text-xs font-medium mb-1">
+                            تعویض فایل (اختیاری)
+                          </label>
+                          <input
+                            type="file"
+                            accept="image/*,video/*,.pdf"
+                            onChange={(e) => {
+                              const f = e.target.files?.[0] || null;
+                              setReplaceFile(f);
+                              cleanupReplacePreview();
+                              if (f && f.type.startsWith('image/')) {
+                                setReplacePreview(URL.createObjectURL(f));
+                              }
+                            }}
+                            className="w-full px-2 py-1 text-xs border rounded"
+                          />
+                          {replacePreview && (
+                            <div className="mt-2 border rounded overflow-hidden">
+                              <img
+                                src={replacePreview}
+                                alt="پیش‌نمایش"
+                                className="w-full h-auto"
+                              />
+                            </div>
+                          )}
+                        </div>
+                        <input
+                          type="text"
+                          value={editAlt}
+                          onChange={(e) => setEditAlt(e.target.value)}
+                          placeholder="Alt Text"
+                          className="w-full px-2 py-1 text-xs border rounded"
+                          autoFocus
+                        />
+                        <textarea
+                          value={editCaption}
+                          onChange={(e) => setEditCaption(e.target.value)}
+                          placeholder="Caption"
+                          className="w-full px-2 py-1 text-xs border rounded"
+                          rows={2}
+                        />
+                        <div className="flex gap-1">
+                          <Button size="sm" onClick={saveEdit}>
+                            ذخیره
+                          </Button>
+                          <Button size="sm" variant="secondary" onClick={cancelEdit}>
+                            انصراف
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="absolute inset-0 bg-black bg-opacity-0 hover:bg-opacity-50 transition-all flex items-center justify-center gap-2 opacity-0 hover:opacity-100">
+                      <button
+                        type="button"
+                        onClick={() => startEdit(item)}
+                        className="px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
+                      >
+                        ویرایش
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(item)}
+                        className="px-3 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700"
+                      >
+                        حذف
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="p-2">
+                  <p className="text-xs font-medium truncate">{item.alt || 'بدون نام'}</p>
+                  {item.caption && (
+                    <p className="text-xs text-gray-500 truncate mt-1">{item.caption}</p>
+                  )}
+                  <div className="flex items-center justify-between text-xs text-gray-400 mt-1">
+                    {item.width && item.height && <span>{item.width} × {item.height}</span>}
+                    {item.createdAt && <span>{formatPersianDate(item.createdAt)}</span>}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <Pagination
+            page={page}
+            totalPages={totalPages}
+            total={total}
+            limit={DEFAULT_PAGE_SIZE}
+            onPageChange={setPage}
+          />
+        </>
       )}
     </div>
   );
 }
-

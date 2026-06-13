@@ -5,12 +5,14 @@ import StarterKit from '@tiptap/starter-kit';
 import Image from '@tiptap/extension-image';
 import TextAlign from '@tiptap/extension-text-align';
 import Link from '@tiptap/extension-link';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { listMedia, getMediaUrl } from '@/lib/api';
+import { isImage } from '@/lib/utils';
+import type { TiptapContent, Media } from '@/types';
 
 interface RichTextEditorProps {
-  content: any;
-  onChange: (content: any) => void;
+  content: TiptapContent | null;
+  onChange: (content: TiptapContent) => void;
 }
 
 export function RichTextEditor({ content, onChange }: RichTextEditorProps) {
@@ -18,7 +20,7 @@ export function RichTextEditor({ content, onChange }: RichTextEditorProps) {
   const [showLinkModal, setShowLinkModal] = useState(false);
   const [linkUrl, setLinkUrl] = useState('');
   const [linkText, setLinkText] = useState('');
-  const [mediaItems, setMediaItems] = useState<any[]>([]);
+  const [mediaItems, setMediaItems] = useState<Media[]>([]);
 
   const editor = useEditor({
     extensions: [
@@ -42,13 +44,13 @@ export function RichTextEditor({ content, onChange }: RichTextEditorProps) {
     ],
     content: content || '',
     onUpdate: ({ editor }) => {
-      onChange(editor.getJSON());
+      onChange(editor.getJSON() as TiptapContent);
     },
     editorProps: {
       attributes: {
-        class: 'prose prose-sm max-w-none focus:outline-none min-h-[300px] p-4'
-      }
-    }
+        class: 'prose prose-sm max-w-none focus:outline-none min-h-[300px] p-4',
+      },
+    },
   });
 
   useEffect(() => {
@@ -57,31 +59,24 @@ export function RichTextEditor({ content, onChange }: RichTextEditorProps) {
     }
   }, [content, editor]);
 
-  async function loadMedia() {
+  const loadMedia = useCallback(async () => {
     const res = await listMedia({ limit: 50 });
-    if (res.ok && res.items) {
-      setMediaItems(res.items);
-    }
-  }
+    if (res.ok && res.items) setMediaItems(res.items);
+  }, []);
 
-  function handleInsertImage(media: any) {
+  function handleInsertImage(media: Media) {
     if (!editor) return;
     const imageUrl = getMediaUrl(media.path);
     editor.chain().focus().setImage({ src: imageUrl, alt: media.alt || '' }).run();
     setShowImageModal(false);
   }
 
-  function isImage(path: string): boolean {
-    return /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(path);
-  }
-
   function handleOpenLinkModal() {
     if (!editor) return;
     const { from, to } = editor.state.selection;
     const selectedText = editor.state.doc.textBetween(from, to, ' ');
-    
-    // Check if there's already a link
     const attrs = editor.getAttributes('link');
+
     if (attrs.href) {
       setLinkUrl(attrs.href);
       setLinkText(selectedText || attrs.href);
@@ -94,33 +89,38 @@ export function RichTextEditor({ content, onChange }: RichTextEditorProps) {
 
   function handleInsertLink() {
     if (!editor || !linkUrl.trim()) return;
-    
-    const url = linkUrl.trim().startsWith('http://') || linkUrl.trim().startsWith('https://') 
-      ? linkUrl.trim() 
+
+    const url = linkUrl.trim().startsWith('http://') || linkUrl.trim().startsWith('https://')
+      ? linkUrl.trim()
       : `https://${linkUrl.trim()}`;
-    
+
     const { from, to } = editor.state.selection;
     const selectedText = editor.state.doc.textBetween(from, to, ' ');
-    
+
     if (selectedText && !linkText.trim()) {
-      // Apply link to selected text
       editor.chain().focus().setLink({ href: url }).run();
     } else if (linkText.trim()) {
-      // Insert link with custom text
-      editor.chain().focus().insertContent({
-        type: 'text',
-        text: linkText.trim(),
-        marks: [{ type: 'link', attrs: { href: url } }],
-      }).run();
+      editor
+        .chain()
+        .focus()
+        .insertContent({
+          type: 'text',
+          text: linkText.trim(),
+          marks: [{ type: 'link', attrs: { href: url } }],
+        })
+        .run();
     } else {
-      // Insert link with URL as text
-      editor.chain().focus().insertContent({
-        type: 'text',
-        text: url,
-        marks: [{ type: 'link', attrs: { href: url } }],
-      }).run();
+      editor
+        .chain()
+        .focus()
+        .insertContent({
+          type: 'text',
+          text: url,
+          marks: [{ type: 'link', attrs: { href: url } }],
+        })
+        .run();
     }
-    
+
     setShowLinkModal(false);
     setLinkUrl('');
     setLinkText('');
@@ -133,19 +133,35 @@ export function RichTextEditor({ content, onChange }: RichTextEditorProps) {
   }
 
   if (!editor) {
-    return <div className="border rounded-md p-4 min-h-[300px]">در حال بارگذاری ویرایشگر...</div>;
+    return (
+      <div className="border rounded-md p-4 min-h-[300px] flex items-center justify-center">
+        <div className="text-center">
+          <div
+            className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"
+            aria-hidden="true"
+          />
+          <p className="mt-2 text-sm text-gray-500">در حال بارگذاری ویرایشگر...</p>
+        </div>
+      </div>
+    );
   }
 
   return (
     <div className="border rounded-md overflow-hidden">
       {/* Toolbar */}
-      <div className="border-b bg-gray-50 p-2 flex gap-1 flex-wrap">
+      <div
+        className="border-b bg-gray-50 p-2 flex gap-1 flex-wrap"
+        role="toolbar"
+        aria-label="نوار ابزار ویرایشگر"
+      >
         <button
           type="button"
           onClick={() => editor.chain().focus().toggleBold().run()}
           className={`px-3 py-1 text-sm rounded hover:bg-gray-200 ${
             editor.isActive('bold') ? 'bg-gray-300' : ''
           }`}
+          aria-label="بولد"
+          title="بولد"
         >
           <strong>B</strong>
         </button>
@@ -155,6 +171,8 @@ export function RichTextEditor({ content, onChange }: RichTextEditorProps) {
           className={`px-3 py-1 text-sm rounded hover:bg-gray-200 ${
             editor.isActive('italic') ? 'bg-gray-300' : ''
           }`}
+          aria-label="ایتالیک"
+          title="ایتالیک"
         >
           <em>I</em>
         </button>
@@ -164,6 +182,8 @@ export function RichTextEditor({ content, onChange }: RichTextEditorProps) {
           className={`px-3 py-1 text-sm rounded hover:bg-gray-200 ${
             editor.isActive('heading', { level: 1 }) ? 'bg-gray-300' : ''
           }`}
+          aria-label="سرفصل ۱"
+          title="سرفصل ۱"
         >
           H1
         </button>
@@ -173,6 +193,8 @@ export function RichTextEditor({ content, onChange }: RichTextEditorProps) {
           className={`px-3 py-1 text-sm rounded hover:bg-gray-200 ${
             editor.isActive('heading', { level: 2 }) ? 'bg-gray-300' : ''
           }`}
+          aria-label="سرفصل ۲"
+          title="سرفصل ۲"
         >
           H2
         </button>
@@ -182,38 +204,30 @@ export function RichTextEditor({ content, onChange }: RichTextEditorProps) {
           className={`px-3 py-1 text-sm rounded hover:bg-gray-200 ${
             editor.isActive('heading', { level: 3 }) ? 'bg-gray-300' : ''
           }`}
+          aria-label="سرفصل ۳"
+          title="سرفصل ۳"
         >
           H3
         </button>
         <button
           type="button"
-          onClick={() => {
-            if (editor.isActive('bulletList')) {
-              editor.chain().focus().toggleBulletList().run();
-            } else {
-              // Toggle will create a list if not active
-              editor.chain().focus().toggleBulletList().run();
-            }
-          }}
+          onClick={() => editor.chain().focus().toggleBulletList().run()}
           className={`px-3 py-1 text-sm rounded hover:bg-gray-200 ${
             editor.isActive('bulletList') ? 'bg-gray-300' : ''
           }`}
+          aria-label="لیست نامرتب"
+          title="لیست نامرتب"
         >
           •
         </button>
         <button
           type="button"
-          onClick={() => {
-            if (editor.isActive('orderedList')) {
-              editor.chain().focus().toggleOrderedList().run();
-            } else {
-              // Toggle will create a list if not active
-              editor.chain().focus().toggleOrderedList().run();
-            }
-          }}
+          onClick={() => editor.chain().focus().toggleOrderedList().run()}
           className={`px-3 py-1 text-sm rounded hover:bg-gray-200 ${
             editor.isActive('orderedList') ? 'bg-gray-300' : ''
           }`}
+          aria-label="لیست مرتب"
+          title="لیست مرتب"
         >
           1.
         </button>
@@ -223,16 +237,19 @@ export function RichTextEditor({ content, onChange }: RichTextEditorProps) {
           className={`px-3 py-1 text-sm rounded hover:bg-gray-200 ${
             editor.isActive('blockquote') ? 'bg-gray-300' : ''
           }`}
+          aria-label="نقل قول"
+          title="نقل قول"
         >
-          &quot;
+          "
         </button>
-        <div className="w-px h-6 bg-gray-300 mx-1"></div>
+        <div className="w-px h-6 bg-gray-300 mx-1" aria-hidden="true" />
         <button
           type="button"
           onClick={() => editor.chain().focus().setTextAlign('left').run()}
           className={`px-3 py-1 text-sm rounded hover:bg-gray-200 ${
             editor.isActive({ textAlign: 'left' }) ? 'bg-gray-300' : ''
           }`}
+          aria-label="چپ چین"
           title="چپ چین"
         >
           ⬅
@@ -243,6 +260,7 @@ export function RichTextEditor({ content, onChange }: RichTextEditorProps) {
           className={`px-3 py-1 text-sm rounded hover:bg-gray-200 ${
             editor.isActive({ textAlign: 'center' }) ? 'bg-gray-300' : ''
           }`}
+          aria-label="وسط چین"
           title="وسط چین"
         >
           ⬌
@@ -253,6 +271,7 @@ export function RichTextEditor({ content, onChange }: RichTextEditorProps) {
           className={`px-3 py-1 text-sm rounded hover:bg-gray-200 ${
             editor.isActive({ textAlign: 'right' }) ? 'bg-gray-300' : ''
           }`}
+          aria-label="راست چین"
           title="راست چین"
         >
           ➡
@@ -263,18 +282,20 @@ export function RichTextEditor({ content, onChange }: RichTextEditorProps) {
           className={`px-3 py-1 text-sm rounded hover:bg-gray-200 ${
             editor.isActive({ textAlign: 'justify' }) ? 'bg-gray-300' : ''
           }`}
+          aria-label="چاستیفای"
           title="چاستیفای"
         >
           ⬌⬌
         </button>
-        <div className="w-px h-6 bg-gray-300 mx-1"></div>
+        <div className="w-px h-6 bg-gray-300 mx-1" aria-hidden="true" />
         <button
           type="button"
           onClick={handleOpenLinkModal}
           className={`px-3 py-1 text-sm rounded hover:bg-gray-200 ${
             editor.isActive('link') ? 'bg-gray-300' : ''
           }`}
-          title="لینک"
+          aria-label="افزودن لینک"
+          title="افزودن لینک"
         >
           🔗
         </button>
@@ -283,16 +304,19 @@ export function RichTextEditor({ content, onChange }: RichTextEditorProps) {
             type="button"
             onClick={handleRemoveLink}
             className="px-3 py-1 text-sm rounded hover:bg-gray-200"
+            aria-label="حذف لینک"
             title="حذف لینک"
           >
             🔗✕
           </button>
         )}
-        <div className="w-px h-6 bg-gray-300 mx-1"></div>
+        <div className="w-px h-6 bg-gray-300 mx-1" aria-hidden="true" />
         <button
           type="button"
           onClick={() => editor.chain().focus().setHorizontalRule().run()}
           className="px-3 py-1 text-sm rounded hover:bg-gray-200"
+          aria-label="خط افقی"
+          title="خط افقی"
         >
           ─
         </button>
@@ -303,6 +327,7 @@ export function RichTextEditor({ content, onChange }: RichTextEditorProps) {
             loadMedia();
           }}
           className="px-3 py-1 text-sm rounded hover:bg-gray-200"
+          aria-label="درج تصویر"
           title="درج تصویر"
         >
           🖼️
@@ -312,6 +337,8 @@ export function RichTextEditor({ content, onChange }: RichTextEditorProps) {
           onClick={() => editor.chain().focus().undo().run()}
           disabled={!editor.can().undo()}
           className="px-3 py-1 text-sm rounded hover:bg-gray-200 disabled:opacity-50"
+          aria-label="واگرد"
+          title="واگرد"
         >
           ↶
         </button>
@@ -320,6 +347,8 @@ export function RichTextEditor({ content, onChange }: RichTextEditorProps) {
           onClick={() => editor.chain().focus().redo().run()}
           disabled={!editor.can().redo()}
           className="px-3 py-1 text-sm rounded hover:bg-gray-200 disabled:opacity-50"
+          aria-label="جلو"
+          title="جلو"
         >
           ↷
         </button>
@@ -328,21 +357,31 @@ export function RichTextEditor({ content, onChange }: RichTextEditorProps) {
       {/* Editor */}
       <EditorContent editor={editor} />
 
-      {/* Image Insert Modal */}
+      {/* Image Modal */}
       {showImageModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg max-w-4xl w-full max-h-[80vh] flex flex-col">
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4"
+          onClick={() => setShowImageModal(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-label="انتخاب تصویر"
+        >
+          <div
+            className="bg-white rounded-lg max-w-4xl w-full max-h-[80vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="p-4 border-b flex items-center justify-between">
               <h3 className="text-lg font-semibold">انتخاب تصویر برای درج در محتوا</h3>
               <button
                 type="button"
                 onClick={() => setShowImageModal(false)}
                 className="text-gray-500 hover:text-gray-700"
+                aria-label="بستن"
               >
                 ✕
               </button>
             </div>
-            
+
             <div className="flex-1 overflow-y-auto p-4">
               <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
                 {mediaItems
@@ -359,6 +398,7 @@ export function RichTextEditor({ content, onChange }: RichTextEditorProps) {
                           src={getMediaUrl(item.path)}
                           alt={item.alt || ''}
                           className="w-full h-full object-cover"
+                          loading="lazy"
                         />
                       </div>
                       {item.alt && (
@@ -369,7 +409,7 @@ export function RichTextEditor({ content, onChange }: RichTextEditorProps) {
                     </button>
                   ))}
               </div>
-              
+
               {mediaItems.filter((item) => isImage(item.path)).length === 0 && (
                 <div className="text-center py-8 text-gray-500">
                   <p>هنوز تصویری آپلود نشده است</p>
@@ -381,10 +421,19 @@ export function RichTextEditor({ content, onChange }: RichTextEditorProps) {
         </div>
       )}
 
-      {/* Link Insert Modal */}
+      {/* Link Modal */}
       {showLinkModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg max-w-md w-full">
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4"
+          onClick={() => setShowLinkModal(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-label="افزودن لینک"
+        >
+          <div
+            className="bg-white rounded-lg max-w-md w-full"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="p-4 border-b flex items-center justify-between">
               <h3 className="text-lg font-semibold">افزودن لینک</h3>
               <button
@@ -395,17 +444,19 @@ export function RichTextEditor({ content, onChange }: RichTextEditorProps) {
                   setLinkText('');
                 }}
                 className="text-gray-500 hover:text-gray-700"
+                aria-label="بستن"
               >
                 ✕
               </button>
             </div>
-            
+
             <div className="p-4 space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label htmlFor="link-url" className="block text-sm font-medium text-gray-700 mb-1">
                   آدرس URL
                 </label>
                 <input
+                  id="link-url"
                   type="text"
                   value={linkUrl}
                   onChange={(e) => setLinkUrl(e.target.value)}
@@ -413,17 +464,20 @@ export function RichTextEditor({ content, onChange }: RichTextEditorProps) {
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
+                      e.preventDefault();
                       handleInsertLink();
                     }
                   }}
                   autoFocus
+                  dir="ltr"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label htmlFor="link-text" className="block text-sm font-medium text-gray-700 mb-1">
                   متن لینک (اختیاری)
                 </label>
                 <input
+                  id="link-text"
                   type="text"
                   value={linkText}
                   onChange={(e) => setLinkText(e.target.value)}
@@ -431,6 +485,7 @@ export function RichTextEditor({ content, onChange }: RichTextEditorProps) {
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
+                      e.preventDefault();
                       handleInsertLink();
                     }
                   }}
@@ -476,4 +531,3 @@ export function RichTextEditor({ content, onChange }: RichTextEditorProps) {
     </div>
   );
 }
-

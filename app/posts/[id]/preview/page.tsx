@@ -9,17 +9,33 @@ import Image from '@tiptap/extension-image';
 import Link from '@tiptap/extension-link';
 import dayjs from 'dayjs';
 import 'dayjs/locale/fa';
+import { useToast } from '@/hooks/useToast';
+import { POST_STATUS_COLORS, POST_STATUS_LABELS } from '@/lib/constants';
+import { getRefName, isImage } from '@/lib/utils';
+import type { Post, TiptapNode } from '@/types';
 
 dayjs.locale('fa');
 
-// This page should render without Layout
 export const dynamic = 'force-dynamic';
+
+function rewriteImageSrc(node: TiptapNode | null | undefined): TiptapNode | null | undefined {
+  if (!node) return node;
+  const cloned: TiptapNode = { ...node };
+  if (cloned.type === 'image' && cloned.attrs?.src) {
+    cloned.attrs = { ...cloned.attrs, src: getMediaUrl(String(cloned.attrs.src)) };
+  }
+  if (Array.isArray(cloned.content)) {
+    cloned.content = cloned.content.map(rewriteImageSrc) as TiptapNode[];
+  }
+  return cloned;
+}
 
 export default function PostPreviewPage() {
   const params = useParams();
   const router = useRouter();
+  const toast = useToast();
   const id = params?.id as string;
-  const [post, setPost] = useState<any>(null);
+  const [post, setPost] = useState<Post | null>(null);
   const [loading, setLoading] = useState(true);
   const [coverImageUrl, setCoverImageUrl] = useState<string | null>(null);
   const [ogImageUrl, setOgImageUrl] = useState<string | null>(null);
@@ -55,80 +71,52 @@ export default function PostPreviewPage() {
     if (res.ok && res.post) {
       const postData = res.post;
       setPost(postData);
-      
-      // Normalize image URLs inside editor content (tiptap JSON)
-      function rewriteImageSrc(node: any): any {
-        if (!node) return node;
-        const cloned = { ...node };
-        if (cloned.type === 'image' && cloned.attrs?.src) {
-          cloned.attrs = { ...cloned.attrs, src: getMediaUrl(String(cloned.attrs.src)) };
-        }
-        if (Array.isArray(cloned.content)) {
-          cloned.content = cloned.content.map(rewriteImageSrc);
-        }
-        return cloned;
-      }
-      
-      // Load cover image - check if it's already populated or needs fetching
+
+      // Load cover image
       if (postData.coverImageId) {
         if (typeof postData.coverImageId === 'object' && postData.coverImageId.path) {
-          // Already populated from API
           setCoverImageUrl(getMediaUrl(postData.coverImageId.path));
         } else {
-          // Need to fetch
           try {
             const mediaRes = await getMedia(postData.coverImageId.toString());
             if (mediaRes.ok && mediaRes.media) {
               setCoverImageUrl(getMediaUrl(mediaRes.media.path));
             }
-          } catch (e) {
-            // Error loading cover image
+          } catch {
+            /* ignore */
           }
         }
       }
 
-      // Load OG image - check if it's already populated or needs fetching
+      // Load OG image
       if (postData.seo?.ogImageId) {
         if (typeof postData.seo.ogImageId === 'object' && postData.seo.ogImageId.path) {
-          // Already populated from API
           setOgImageUrl(getMediaUrl(postData.seo.ogImageId.path));
         } else {
-          // Need to fetch
           try {
             const mediaRes = await getMedia(postData.seo.ogImageId.toString());
             if (mediaRes.ok && mediaRes.media) {
               setOgImageUrl(getMediaUrl(mediaRes.media.path));
             }
-          } catch (e) {
-            // Error loading OG image
+          } catch {
+            /* ignore */
           }
         }
       }
 
-      // Set editor content
       if (editor && postData.content) {
-        const contentWithAbsoluteImages = rewriteImageSrc(postData.content);
-        editor.commands.setContent(contentWithAbsoluteImages);
+        const contentWithAbsoluteImages = rewriteImageSrc(postData.content as TiptapNode);
+        editor.commands.setContent(contentWithAbsoluteImages as any);
       }
+    } else {
+      toast.error(res.error || 'خطا در بارگذاری پست');
     }
     setLoading(false);
   }
 
   useEffect(() => {
     if (editor && post?.content) {
-      // Ensure images inside content have absolute API URLs
-      function rewriteImageSrc(node: any): any {
-        if (!node) return node;
-        const cloned = { ...node };
-        if (cloned.type === 'image' && cloned.attrs?.src) {
-          cloned.attrs = { ...cloned.attrs, src: getMediaUrl(String(cloned.attrs.src)) };
-        }
-        if (Array.isArray(cloned.content)) {
-          cloned.content = cloned.content.map(rewriteImageSrc);
-        }
-        return cloned;
-      }
-      editor.commands.setContent(rewriteImageSrc(post.content));
+      editor.commands.setContent(rewriteImageSrc(post.content as TiptapNode) as any);
     }
   }, [editor, post]);
 
@@ -136,7 +124,10 @@ export default function PostPreviewPage() {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+          <div
+            className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"
+            aria-hidden="true"
+          />
           <p className="mt-4 text-gray-600">در حال بارگذاری...</p>
         </div>
       </div>
@@ -149,6 +140,7 @@ export default function PostPreviewPage() {
         <div className="text-center">
           <p className="text-gray-600">پست یافت نشد</p>
           <button
+            type="button"
             onClick={() => router.back()}
             className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
           >
@@ -166,18 +158,24 @@ export default function PostPreviewPage() {
         <div className="max-w-4xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
             <span className="text-yellow-800 font-medium">👁️ پیش‌نمایش پست</span>
-            <span className="px-2 py-1 bg-yellow-200 text-yellow-800 rounded text-xs font-medium">
-              {post.status === 'draft' ? 'پیش‌نویس' : post.status === 'scheduled' ? 'زمان‌بندی شده' : 'منتشر شده'}
+            <span
+              className={`px-2 py-1 rounded text-xs font-medium ${
+                POST_STATUS_COLORS[post.status] || 'bg-gray-200'
+              }`}
+            >
+              {POST_STATUS_LABELS[post.status] || post.status}
             </span>
           </div>
           <div className="flex gap-2">
             <button
+              type="button"
               onClick={() => router.push(`/posts/${id}`)}
               className="px-4 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 text-sm font-medium"
             >
               ویرایش
             </button>
             <button
+              type="button"
               onClick={() => router.back()}
               className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium"
             >
@@ -189,34 +187,21 @@ export default function PostPreviewPage() {
 
       {/* Article Content */}
       <article className="max-w-4xl mx-auto px-6 py-12">
-        {/* Header */}
         <header className="mb-8">
           <h1 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4 leading-tight">
             {post.title}
           </h1>
 
           {post.excerpt && (
-            <p className="text-xl text-gray-600 mb-6 leading-relaxed">
-              {post.excerpt}
-            </p>
+            <p className="text-xl text-gray-600 mb-6 leading-relaxed">{post.excerpt}</p>
           )}
 
-          {/* Meta Info */}
           <div className="flex items-center gap-4 text-sm text-gray-500 mb-6">
-            {post.publishAt && (
-              <span>
-                📅 {dayjs(post.publishAt).format('DD MMMM YYYY')}
-              </span>
-            )}
-            {post.readingTime && (
-              <span>
-                ⏱️ {post.readingTime} دقیقه خواندن
-              </span>
-            )}
+            {post.publishAt && <span>📅 {dayjs(post.publishAt).format('DD MMMM YYYY')}</span>}
+            {post.readingTime && <span>⏱️ {post.readingTime} دقیقه خواندن</span>}
           </div>
 
-          {/* Cover Image */}
-          {coverImageUrl && (
+          {coverImageUrl && typeof post.coverImageId === 'string' && isImage(post.coverImageId) && (
             <div className="mb-8 rounded-xl overflow-hidden shadow-lg">
               <img
                 src={coverImageUrl}
@@ -227,24 +212,21 @@ export default function PostPreviewPage() {
           )}
         </header>
 
-        {/* Content */}
         <div className="prose prose-lg max-w-none">
           {editor && <EditorContent editor={editor} />}
         </div>
 
-        {/* Footer */}
         <footer className="mt-12 pt-8 border-t border-gray-200">
           {post.tags && post.tags.length > 0 && (
             <div className="mb-6">
               <h3 className="text-sm font-semibold text-gray-700 mb-3">برچسب‌ها:</h3>
               <div className="flex flex-wrap gap-2">
-                {post.tags.map((tag: any, index: number) => {
-                  const tagName = typeof tag === 'string' 
-                    ? tag 
-                    : (tag?.name || tag?.slug || tag?._id || tag || 'برچسب');
+                {post.tags.map((tag, index) => {
+                  const tagName = getRefName(tag, 'برچسب');
+                  const tagId = typeof tag === 'string' ? tag : tag?._id;
                   return (
                     <span
-                      key={tag?._id || index}
+                      key={tagId || index}
                       className="px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-sm"
                     >
                       #{tagName}
@@ -254,14 +236,12 @@ export default function PostPreviewPage() {
               </div>
             </div>
           )}
-          
+
           {post.categoryId && (
             <div>
               <h3 className="text-sm font-semibold text-gray-700 mb-3">دسته‌بندی:</h3>
               <span className="px-3 py-1 bg-green-50 text-green-700 rounded-full text-sm">
-                {typeof post.categoryId === 'string' 
-                  ? 'در حال بارگذاری...' 
-                  : (post.categoryId?.name || post.categoryId?.slug || 'دسته‌بندی')}
+                {getRefName(post.categoryId, 'دسته‌بندی')}
               </span>
             </div>
           )}
@@ -272,14 +252,11 @@ export default function PostPreviewPage() {
       <div className="max-w-4xl mx-auto px-6 pb-12">
         <div className="bg-gray-50 rounded-xl p-6 border border-gray-200">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">پیش‌نمایش SEO</h3>
-          
-          {/* Google Search Preview */}
+
           <div className="mb-6">
             <p className="text-xs text-gray-500 mb-2">نمایش در Google:</p>
             <div className="bg-white p-4 rounded-lg border border-gray-200">
-              <div className="text-blue-600 text-sm mb-1">
-                {post.slug || 'example.com'}
-              </div>
+              <div className="text-blue-600 text-sm mb-1">{post.slug || 'example.com'}</div>
               <div className="text-xl text-blue-700 font-medium mb-1">
                 {post.seo?.metaTitle || post.title}
               </div>
@@ -289,13 +266,16 @@ export default function PostPreviewPage() {
             </div>
           </div>
 
-          {/* Open Graph Preview */}
           {post.seo?.ogTitle && (
             <div className="mb-6">
               <p className="text-xs text-gray-500 mb-2">نمایش در شبکه‌های اجتماعی:</p>
               <div className="bg-white rounded-lg border border-gray-200 overflow-hidden max-w-md">
                 {ogImageUrl && (
-                  <img src={ogImageUrl} alt={post.seo.ogTitle} className="w-full h-48 object-cover" />
+                  <img
+                    src={ogImageUrl}
+                    alt={post.seo.ogTitle}
+                    className="w-full h-48 object-cover"
+                  />
                 )}
                 <div className="p-4">
                   <div className="text-xs text-gray-500 uppercase mb-1">example.com</div>
@@ -314,4 +294,3 @@ export default function PostPreviewPage() {
     </div>
   );
 }
-

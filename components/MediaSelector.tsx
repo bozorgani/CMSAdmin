@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { listMedia, getMediaUrl, getMedia } from '@/lib/api';
+import { isImage } from '@/lib/utils';
 
 interface MediaSelectorProps {
   value?: string;
@@ -15,13 +16,7 @@ export function MediaSelector({ value, onChange, label }: MediaSelectorProps) {
   const [loading, setLoading] = useState(false);
   const [selectedMedia, setSelectedMedia] = useState<any | null>(null);
 
-  useEffect(() => {
-    if (value) {
-      loadMedia();
-    }
-  }, [value]);
-
-  async function loadMedia() {
+  const loadMedia = useCallback(async () => {
     setLoading(true);
     const res = await listMedia({ limit: 50 });
     if (res.ok && res.items) {
@@ -35,12 +30,18 @@ export function MediaSelector({ value, onChange, label }: MediaSelectorProps) {
           try {
             const one = await getMedia(value);
             if (one.ok && one.media) setSelectedMedia(one.media);
-          } catch {}
+          } catch {
+            /* ignore */
+          }
         }
       }
     }
     setLoading(false);
-  }
+  }, [value]);
+
+  useEffect(() => {
+    if (value) loadMedia();
+  }, [value, loadMedia]);
 
   function handleSelectMedia(media: any) {
     setSelectedMedia(media);
@@ -50,17 +51,13 @@ export function MediaSelector({ value, onChange, label }: MediaSelectorProps) {
 
   function handleRemove() {
     setSelectedMedia(null);
-    onChange(null as any);
-  }
-
-  function isImage(path: string): boolean {
-    return /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(path);
+    onChange(null);
   }
 
   return (
     <div className="space-y-2">
       <label className="block text-sm font-medium">{label}</label>
-      
+
       {selectedMedia ? (
         <div className="border rounded-md p-3 bg-gray-50">
           <div className="flex items-center gap-3">
@@ -116,19 +113,29 @@ export function MediaSelector({ value, onChange, label }: MediaSelectorProps) {
 
       {/* Modal */}
       {showModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg max-w-4xl w-full max-h-[80vh] flex flex-col">
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4"
+          onClick={() => setShowModal(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-label="انتخاب رسانه"
+        >
+          <div
+            className="bg-white rounded-lg max-w-4xl w-full max-h-[80vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="p-4 border-b flex items-center justify-between">
               <h3 className="text-lg font-semibold">انتخاب رسانه</h3>
               <button
                 type="button"
                 onClick={() => setShowModal(false)}
                 className="text-gray-500 hover:text-gray-700"
+                aria-label="بستن"
               >
                 ✕
               </button>
             </div>
-            
+
             <div className="flex-1 overflow-y-auto p-4">
               {loading ? (
                 <div className="text-center py-8">در حال بارگذاری...</div>
@@ -140,7 +147,9 @@ export function MediaSelector({ value, onChange, label }: MediaSelectorProps) {
                       type="button"
                       onClick={() => handleSelectMedia(item)}
                       className={`border-2 rounded-md overflow-hidden hover:border-blue-500 transition-all ${
-                        selectedMedia?._id === item._id ? 'border-blue-500 ring-2 ring-blue-200' : 'border-gray-200'
+                        selectedMedia?._id === item._id
+                          ? 'border-blue-500 ring-2 ring-blue-200'
+                          : 'border-gray-200'
                       }`}
                     >
                       <div className="aspect-square bg-gray-100">
@@ -149,6 +158,7 @@ export function MediaSelector({ value, onChange, label }: MediaSelectorProps) {
                             src={getMediaUrl(item.path)}
                             alt={item.alt || ''}
                             className="w-full h-full object-cover"
+                            loading="lazy"
                           />
                         ) : (
                           <div className="w-full h-full flex items-center justify-center">
@@ -160,7 +170,7 @@ export function MediaSelector({ value, onChange, label }: MediaSelectorProps) {
                   ))}
                 </div>
               )}
-              
+
               {!loading && mediaItems.length === 0 && (
                 <div className="text-center py-8 text-gray-500">
                   <p>هنوز رسانه‌ای آپلود نشده است</p>
@@ -174,4 +184,3 @@ export function MediaSelector({ value, onChange, label }: MediaSelectorProps) {
     </div>
   );
 }
-
